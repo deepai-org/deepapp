@@ -89,7 +89,7 @@ Running `deep build` writes these files into `build/`:
 - `manifest.json`: services, routes, endpoint identity/rate-limit policy, CDN, health check, rollback.
 - `static-report.json`: language unit counts, invariants, checked rules.
 - `runtime-bundle.json`: runtime capability summary.
-- `migrations.json`: ordered pre-deploy migration plan with online/resumable metadata, DDL, lock-risk notes, and checkpoint keys.
+- `migrations.json`: ordered pre-deploy migration plan with online/resumable metadata, safe additive column DDL, lock-risk notes, checkpoint keys, and bail/resume policy.
 - `sql-plan.json`: MySQL-oriented table DDL, index DDL, indexed lookup plans, and indexed range plans including primary-key `BETWEEN` scans.
 - `storage-catalog.json`: data schemas, fields, indexes, uniqueness, privacy/security flags.
 - `frontend-assets.json`: generated page assets.
@@ -198,11 +198,11 @@ These are blocking for any serious production path.
 
 2. Real migrations on live data
 
-   `deep migrate --preview` is useful, but DeepAI runs migrations on tables with 300M+ rows where `ALTER TABLE` can lock the table for minutes. DeepApp now emits ordered pre-deploy migration steps with online/resumable metadata, DDL, lock-risk notes, and checkpoint keys. Production migration support still needs actual execution against live MySQL plus:
+   `deep migrate --preview` is useful, but DeepAI runs migrations on tables with 300M+ rows where `ALTER TABLE` can lock the table for minutes. DeepApp now emits ordered pre-deploy migration steps with online/resumable metadata, safe additive column DDL using online MySQL clauses, lock-risk notes, checkpoint keys, and explicit bail/resume policy. Production migration support still needs actual execution against live MySQL plus:
 
    - Migration ordering guarantees, including `migrate before deploy` from `deploy_rules`.
-   - Safe column-add semantics that avoid table rewrites.
-   - The ability to bail out and resume.
+   - Verification of safe column-add semantics against live MySQL table definitions.
+   - Actual bail-out and resume execution against live migration checkpoints.
 
 3. Handler bodies that actually execute
 

@@ -317,7 +317,11 @@ pub struct MigrationStep {
     pub resumable: bool,
     pub lock_risk: String,
     pub ddl: Vec<String>,
+    pub safe_column_add: bool,
+    pub additive_ddl: Vec<String>,
     pub checkpoint_key: String,
+    pub resume_policy: String,
+    pub bail_out: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1521,6 +1525,7 @@ fn compile_migrations(sql_plan: &SqlPlan) -> Vec<MigrationStep> {
         .map(|(idx, table)| {
             let mut ddl = vec![table.create_table.clone()];
             ddl.extend(table.indexes.iter().cloned());
+            let additive_ddl = mysql_safe_column_adds(table);
             MigrationStep {
                 table: table.table.clone(),
                 action: "create_or_reconcile".into(),
@@ -1528,10 +1533,32 @@ fn compile_migrations(sql_plan: &SqlPlan) -> Vec<MigrationStep> {
                 phase: "pre_deploy".into(),
                 online: true,
                 resumable: true,
-                lock_risk: "metadata_lock_only_for_new_table_or_online_additive_changes".into(),
+                lock_risk: "metadata_lock_only_for_new_table_or_online_additive_column_changes"
+                    .into(),
                 ddl,
+                safe_column_add: true,
+                additive_ddl,
                 checkpoint_key: format!("migration:{}:create_or_reconcile", table.table),
+                resume_policy: "checkpoint_before_each_ddl_statement".into(),
+                bail_out: "stop_before_next_statement_and_keep_checkpoint".into(),
             }
+        })
+        .collect()
+}
+
+fn mysql_safe_column_adds(table: &SqlTablePlan) -> Vec<String> {
+    table
+        .create_table
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim().trim_end_matches(',');
+            if !trimmed.starts_with('`') || trimmed.contains(" PRIMARY KEY ") {
+                return None;
+            }
+            Some(format!(
+                "ALTER TABLE `{}` ADD COLUMN {}, ALGORITHM=INPLACE, LOCK=NONE;",
+                table.table, trimmed
+            ))
         })
         .collect()
 }
@@ -3384,6 +3411,13 @@ invariant "cron jobs have healthchecks"
                 && step.online
                 && step.resumable
                 && step.checkpoint_key.starts_with("migration:")
+                && step.safe_column_add
+                && step
+                    .additive_ddl
+                    .iter()
+                    .all(|ddl| ddl.contains("ALGORITHM=INPLACE, LOCK=NONE"))
+                && step.resume_policy == "checkpoint_before_each_ddl_statement"
+                && step.bail_out == "stop_before_next_statement_and_keep_checkpoint"
                 && !step.ddl.is_empty()
         }));
         assert_eq!(artifacts.frontend_assets[0].title, "Chat");

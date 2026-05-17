@@ -9,7 +9,7 @@ Objective: implement DeepApp design v2 with a Docker-first workflow, TDD, and cl
 - Static analyzer for the core design rules that are currently enforceable from source text.
 - Build artifact generator for deployment manifest, static report, runtime bundle description, and migration plan.
 - MySQL-oriented SQL planning artifact for declared tables, indexes, indexed `where(...)` lookup/range query patterns, and primary-key `BETWEEN` scans.
-- Ordered online migration planning metadata with DDL, pre-deploy phase, lock-risk notes, resumability, and checkpoint keys.
+- Ordered online migration planning metadata with DDL, safe additive column DDL, pre-deploy phase, lock-risk notes, resumability, checkpoint keys, and bail/resume policy.
 - Executable runtime slice for compiled pages/endpoints, health checks, and compiler metadata routes.
 - SSE/chunked-transfer runtime response path for endpoints declared with `response: stream`.
 - Frontend asset compiler for page titles, component names, state declarations, and generated HTML.
@@ -46,7 +46,7 @@ Objective: implement DeepApp design v2 with a Docker-first workflow, TDD, and cl
   - Handler interpreter tests cover parsing and evaluating simple endpoint return objects.
   - Model tests cover model catalog parsing, default model fallback, and provider failover.
   - Pricing tests cover catalog parsing, default model fallback, chat endpoint charge metadata, and usage cent counters.
-  - Migration tests cover pre-deploy ordering, online/resumable metadata, checkpoint keys, and generated DDL presence.
+  - Migration tests cover pre-deploy ordering, online/resumable metadata, checkpoint keys, generated DDL presence, online additive column DDL, and bail/resume policy metadata.
   - Task-runner tests cover cron/daemon ticks, worker job processing, task counters, task events, worker result queues, and skip behavior when a declared task lock is held.
   - Endpoint lock tests cover a route inheriting `billing[user.id]` from a called function and returning locked without mutating endpoint counters when the lock is held.
   - `tests/cli.rs` verifies the CLI writes all expected build artifacts.
@@ -55,7 +55,7 @@ Objective: implement DeepApp design v2 with a Docker-first workflow, TDD, and cl
   - `build/static-report.json` records counts for parsed language units.
   - `build/manifest.json` records services, routes, route kind/method, endpoint identity/rate-limit policies, CDN, health check, and rollback policy.
   - `build/manifest.json` records endpoint lock names and lock TTLs inherited from direct endpoint locks or called locked functions.
-  - `build/migrations.json` records ordered pre-deploy migration steps with DDL, online/resumable flags, lock-risk notes, and checkpoint keys.
+  - `build/migrations.json` records ordered pre-deploy migration steps with DDL, online/resumable flags, lock-risk notes, safe additive column DDL, checkpoint keys, and bail/resume policy.
   - `build/sql-plan.json` records MySQL table DDL, index DDL, indexed lookup plans, indexed range plans, and primary-key `BETWEEN` plans derived from `data` declarations and handler query expressions.
   - `build/frontend-assets.json` records page assets generated from `view` blocks, including cache policy, API base URL, and client-fetch data-loading metadata.
   - `build/storage-catalog.json` records data schemas, fields, indexes, and privacy/security flags used by the runtime store.

@@ -35,6 +35,10 @@ fn cli_builds_example_artifacts() {
     let migrations = fs::read_to_string(temp.join("migrations.json")).unwrap();
     assert!(migrations.contains("\"phase\": \"pre_deploy\""));
     assert!(migrations.contains("\"resumable\": true"));
+    assert!(migrations.contains("\"safe_column_add\": true"));
+    assert!(migrations.contains("ALGORITHM=INPLACE, LOCK=NONE"));
+    assert!(migrations.contains("\"resume_policy\""));
+    assert!(migrations.contains("\"bail_out\""));
     assert!(migrations.contains("\"checkpoint_key\""));
     let storage_catalog = fs::read_to_string(temp.join("storage-catalog.json")).unwrap();
     assert!(storage_catalog.contains("\"name\": \"User\""));

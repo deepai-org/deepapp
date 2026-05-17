@@ -6,12 +6,23 @@
     "phase": "pre_deploy",
     "online": true,
     "resumable": true,
-    "lock_risk": "metadata_lock_only_for_new_table_or_online_additive_changes",
+    "lock_risk": "metadata_lock_only_for_new_table_or_online_additive_column_changes",
     "ddl": [
       "CREATE TABLE `ChatMessage` (\n  `content` TEXT,\n  `created_at` DATETIME,\n  `id` BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,\n  `model` TEXT,\n  `role` VARCHAR(64),\n  `session` TEXT,\n  `thinking` TEXT\n) ENGINE=InnoDB;",
       "CREATE INDEX `idx_ChatMessage_session` ON `ChatMessage` (`session`);"
     ],
-    "checkpoint_key": "migration:ChatMessage:create_or_reconcile"
+    "safe_column_add": true,
+    "additive_ddl": [
+      "ALTER TABLE `ChatMessage` ADD COLUMN `content` TEXT, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `ChatMessage` ADD COLUMN `created_at` DATETIME, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `ChatMessage` ADD COLUMN `model` TEXT, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `ChatMessage` ADD COLUMN `role` VARCHAR(64), ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `ChatMessage` ADD COLUMN `session` TEXT, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `ChatMessage` ADD COLUMN `thinking` TEXT, ALGORITHM=INPLACE, LOCK=NONE;"
+    ],
+    "checkpoint_key": "migration:ChatMessage:create_or_reconcile",
+    "resume_policy": "checkpoint_before_each_ddl_statement",
+    "bail_out": "stop_before_next_statement_and_keep_checkpoint"
   },
   {
     "table": "ChatSession",
@@ -20,14 +31,25 @@
     "phase": "pre_deploy",
     "online": true,
     "resumable": true,
-    "lock_risk": "metadata_lock_only_for_new_table_or_online_additive_changes",
+    "lock_risk": "metadata_lock_only_for_new_table_or_online_additive_column_changes",
     "ddl": [
       "CREATE TABLE `ChatSession` (\n  `client_info` TEXT,\n  `created_at` DATETIME,\n  `id` BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,\n  `owner` TEXT,\n  `style` TEXT,\n  `title` TEXT,\n  `uuid` CHAR(36)\n) ENGINE=InnoDB;",
       "CREATE INDEX `idx_ChatSession_client_info` ON `ChatSession` (`client_info`);",
       "CREATE INDEX `idx_ChatSession_owner` ON `ChatSession` (`owner`);",
       "CREATE UNIQUE INDEX `idx_ChatSession_uuid` ON `ChatSession` (`uuid`);"
     ],
-    "checkpoint_key": "migration:ChatSession:create_or_reconcile"
+    "safe_column_add": true,
+    "additive_ddl": [
+      "ALTER TABLE `ChatSession` ADD COLUMN `client_info` TEXT, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `ChatSession` ADD COLUMN `created_at` DATETIME, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `ChatSession` ADD COLUMN `owner` TEXT, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `ChatSession` ADD COLUMN `style` TEXT, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `ChatSession` ADD COLUMN `title` TEXT, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `ChatSession` ADD COLUMN `uuid` CHAR(36), ALGORITHM=INPLACE, LOCK=NONE;"
+    ],
+    "checkpoint_key": "migration:ChatSession:create_or_reconcile",
+    "resume_policy": "checkpoint_before_each_ddl_statement",
+    "bail_out": "stop_before_next_statement_and_keep_checkpoint"
   },
   {
     "table": "ChatStyle",
@@ -36,13 +58,24 @@
     "phase": "pre_deploy",
     "online": true,
     "resumable": true,
-    "lock_risk": "metadata_lock_only_for_new_table_or_online_additive_changes",
+    "lock_risk": "metadata_lock_only_for_new_table_or_online_additive_column_changes",
     "ddl": [
       "CREATE TABLE `ChatStyle` (\n  `creator` TEXT,\n  `id` BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,\n  `image_url` TEXT,\n  `is_public` BOOLEAN,\n  `name` TEXT,\n  `popularity` BIGINT,\n  `system_prompt` TEXT\n) ENGINE=InnoDB;",
       "CREATE INDEX `idx_ChatStyle_creator` ON `ChatStyle` (`creator`);",
       "CREATE INDEX `idx_ChatStyle_popularity` ON `ChatStyle` (`popularity`);"
     ],
-    "checkpoint_key": "migration:ChatStyle:create_or_reconcile"
+    "safe_column_add": true,
+    "additive_ddl": [
+      "ALTER TABLE `ChatStyle` ADD COLUMN `creator` TEXT, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `ChatStyle` ADD COLUMN `image_url` TEXT, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `ChatStyle` ADD COLUMN `is_public` BOOLEAN, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `ChatStyle` ADD COLUMN `name` TEXT, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `ChatStyle` ADD COLUMN `popularity` BIGINT, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `ChatStyle` ADD COLUMN `system_prompt` TEXT, ALGORITHM=INPLACE, LOCK=NONE;"
+    ],
+    "checkpoint_key": "migration:ChatStyle:create_or_reconcile",
+    "resume_policy": "checkpoint_before_each_ddl_statement",
+    "bail_out": "stop_before_next_statement_and_keep_checkpoint"
   },
   {
     "table": "ClientInfo",
@@ -51,12 +84,19 @@
     "phase": "pre_deploy",
     "online": true,
     "resumable": true,
-    "lock_risk": "metadata_lock_only_for_new_table_or_online_additive_changes",
+    "lock_risk": "metadata_lock_only_for_new_table_or_online_additive_column_changes",
     "ddl": [
       "CREATE TABLE `ClientInfo` (\n  `fingerprint` TEXT,\n  `id` BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,\n  `ip_address` TEXT\n) ENGINE=InnoDB;",
       "CREATE UNIQUE INDEX `idx_ClientInfo_fingerprint` ON `ClientInfo` (`fingerprint`);"
     ],
-    "checkpoint_key": "migration:ClientInfo:create_or_reconcile"
+    "safe_column_add": true,
+    "additive_ddl": [
+      "ALTER TABLE `ClientInfo` ADD COLUMN `fingerprint` TEXT, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `ClientInfo` ADD COLUMN `ip_address` TEXT, ALGORITHM=INPLACE, LOCK=NONE;"
+    ],
+    "checkpoint_key": "migration:ClientInfo:create_or_reconcile",
+    "resume_policy": "checkpoint_before_each_ddl_statement",
+    "bail_out": "stop_before_next_statement_and_keep_checkpoint"
   },
   {
     "table": "User",
@@ -65,12 +105,22 @@
     "phase": "pre_deploy",
     "online": true,
     "resumable": true,
-    "lock_risk": "metadata_lock_only_for_new_table_or_online_additive_changes",
+    "lock_risk": "metadata_lock_only_for_new_table_or_online_additive_column_changes",
     "ddl": [
       "CREATE TABLE `User` (\n  `created_at` DATETIME,\n  `email` TEXT,\n  `id` BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,\n  `locked` BOOLEAN,\n  `password_hash` TEXT,\n  `username` TEXT\n) ENGINE=InnoDB;",
       "CREATE UNIQUE INDEX `idx_User_email` ON `User` (`email`);",
       "CREATE UNIQUE INDEX `idx_User_username` ON `User` (`username`);"
     ],
-    "checkpoint_key": "migration:User:create_or_reconcile"
+    "safe_column_add": true,
+    "additive_ddl": [
+      "ALTER TABLE `User` ADD COLUMN `created_at` DATETIME, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `User` ADD COLUMN `email` TEXT, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `User` ADD COLUMN `locked` BOOLEAN, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `User` ADD COLUMN `password_hash` TEXT, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `User` ADD COLUMN `username` TEXT, ALGORITHM=INPLACE, LOCK=NONE;"
+    ],
+    "checkpoint_key": "migration:User:create_or_reconcile",
+    "resume_policy": "checkpoint_before_each_ddl_statement",
+    "bail_out": "stop_before_next_statement_and_keep_checkpoint"
   }
 ]
