@@ -1,3 +1,4 @@
+use redis::Commands;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -356,6 +357,13 @@ pub type JsonRecord = BTreeMap<String, serde_json::Value>;
 #[derive(Debug, Clone)]
 pub struct MemoryStore {
     inner: Arc<Mutex<StoreInner>>,
+    redis: Option<RedisPrimitiveStore>,
+}
+
+#[derive(Debug, Clone)]
+struct RedisPrimitiveStore {
+    client: redis::Client,
+    namespace: String,
 }
 
 #[derive(Debug, Clone)]
@@ -366,6 +374,13 @@ struct StoreInner {
     cache: BTreeMap<String, serde_json::Value>,
     queues: BTreeMap<String, VecDeque<serde_json::Value>>,
     counters: BTreeMap<String, i64>,
+    locks: BTreeMap<String, LockEntry>,
+}
+
+#[derive(Debug, Clone)]
+struct LockEntry {
+    token: String,
+    expires_at: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -375,6 +390,93 @@ pub struct StoreSnapshot {
     pub cache: BTreeMap<String, serde_json::Value>,
     pub queues: BTreeMap<String, Vec<serde_json::Value>>,
     pub counters: BTreeMap<String, i64>,
+}
+
+impl RedisPrimitiveStore {
+    fn new(redis_url: &str, namespace: &str) -> anyhow::Result<Self> {
+        Ok(Self {
+            client: redis::Client::open(redis_url)?,
+            namespace: namespace.into(),
+        })
+    }
+
+    fn connection(&self) -> redis::RedisResult<redis::Connection> {
+        self.client.get_connection()
+    }
+
+    fn key(&self, kind: &str, name: &str) -> String {
+        format!("deepapp:{}:{}:{}", self.namespace, kind, name)
+    }
+
+    fn ping(&self) -> anyhow::Result<()> {
+        let mut connection = self.connection()?;
+        redis::cmd("PING").query::<String>(&mut connection)?;
+        Ok(())
+    }
+
+    fn cache_set(&self, key: &str, value: &serde_json::Value) -> anyhow::Result<()> {
+        let mut connection = self.connection()?;
+        let encoded = serde_json::to_string(value)?;
+        connection.set::<_, _, ()>(self.key("cache", key), encoded)?;
+        Ok(())
+    }
+
+    fn cache_get(&self, key: &str) -> anyhow::Result<Option<serde_json::Value>> {
+        let mut connection = self.connection()?;
+        let encoded: Option<String> = connection.get(self.key("cache", key))?;
+        encoded
+            .map(|value| serde_json::from_str(&value).map_err(Into::into))
+            .transpose()
+    }
+
+    fn queue_push(&self, queue: &str, value: &serde_json::Value) -> anyhow::Result<()> {
+        let mut connection = self.connection()?;
+        let encoded = serde_json::to_string(value)?;
+        connection.rpush::<_, _, usize>(self.key("queue", queue), encoded)?;
+        Ok(())
+    }
+
+    fn queue_pop(&self, queue: &str) -> anyhow::Result<Option<serde_json::Value>> {
+        let mut connection = self.connection()?;
+        let encoded: Option<String> = connection.lpop(self.key("queue", queue), None)?;
+        encoded
+            .map(|value| serde_json::from_str(&value).map_err(Into::into))
+            .transpose()
+    }
+
+    fn counter_add(&self, key: &str, amount: i64) -> anyhow::Result<i64> {
+        let mut connection = self.connection()?;
+        Ok(connection.incr(self.key("counter", key), amount)?)
+    }
+
+    fn counter_get(&self, key: &str) -> anyhow::Result<i64> {
+        let mut connection = self.connection()?;
+        let value: Option<i64> = connection.get(self.key("counter", key))?;
+        Ok(value.unwrap_or(0))
+    }
+
+    fn lock_acquire(&self, key: &str, token: &str, ttl_seconds: u64) -> anyhow::Result<bool> {
+        let mut connection = self.connection()?;
+        let reply: Option<String> = redis::cmd("SET")
+            .arg(self.key("lock", key))
+            .arg(token)
+            .arg("NX")
+            .arg("EX")
+            .arg(ttl_seconds)
+            .query(&mut connection)?;
+        Ok(reply.as_deref() == Some("OK"))
+    }
+
+    fn lock_release(&self, key: &str, token: &str) -> anyhow::Result<bool> {
+        let mut connection = self.connection()?;
+        let deleted: i32 = redis::Script::new(
+            "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end",
+        )
+        .key(self.key("lock", key))
+        .arg(token)
+        .invoke(&mut connection)?;
+        Ok(deleted == 1)
+    }
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -428,6 +530,10 @@ pub fn compile_file(path: &Path) -> anyhow::Result<BuildArtifacts> {
 
 pub fn runtime_from_file(path: &Path) -> anyhow::Result<RuntimeApp> {
     Ok(RuntimeApp::new(compile_file(path)?))
+}
+
+pub fn runtime_from_file_with_redis(path: &Path, redis_url: &str) -> anyhow::Result<RuntimeApp> {
+    RuntimeApp::with_redis(compile_file(path)?, redis_url)
 }
 
 pub fn format_errors(errors: &[DeepError]) -> String {
@@ -1635,6 +1741,11 @@ impl RuntimeApp {
         Self { artifacts, store }
     }
 
+    pub fn with_redis(artifacts: BuildArtifacts, redis_url: &str) -> anyhow::Result<Self> {
+        let store = MemoryStore::with_redis(artifacts.storage_catalog.clone(), redis_url)?;
+        Ok(Self { artifacts, store })
+    }
+
     pub fn store(&self) -> MemoryStore {
         self.store.clone()
     }
@@ -1945,7 +2056,25 @@ impl MemoryStore {
                 cache: BTreeMap::new(),
                 queues: BTreeMap::new(),
                 counters: BTreeMap::new(),
+                locks: BTreeMap::new(),
             })),
+            redis: None,
+        }
+    }
+
+    pub fn with_redis(catalog: Vec<DataDecl>, redis_url: &str) -> anyhow::Result<Self> {
+        let mut store = Self::new(catalog);
+        let redis = RedisPrimitiveStore::new(redis_url, "runtime")?;
+        redis.ping()?;
+        store.redis = Some(redis);
+        Ok(store)
+    }
+
+    pub fn primitive_backend(&self) -> &'static str {
+        if self.redis.is_some() {
+            "redis"
+        } else {
+            "memory"
         }
     }
 
@@ -2032,14 +2161,24 @@ impl MemoryStore {
     }
 
     pub fn cache_set(&self, key: impl Into<String>, value: serde_json::Value) {
+        let key = key.into();
+        if let Some(redis) = &self.redis {
+            redis
+                .cache_set(&key, &value)
+                .expect("redis cache_set failed");
+            return;
+        }
         self.inner
             .lock()
             .expect("memory store lock poisoned")
             .cache
-            .insert(key.into(), value);
+            .insert(key, value);
     }
 
     pub fn cache_get(&self, key: &str) -> Option<serde_json::Value> {
+        if let Some(redis) = &self.redis {
+            return redis.cache_get(key).expect("redis cache_get failed");
+        }
         self.inner
             .lock()
             .expect("memory store lock poisoned")
@@ -2049,16 +2188,26 @@ impl MemoryStore {
     }
 
     pub fn queue_push(&self, queue: impl Into<String>, value: serde_json::Value) {
+        let queue = queue.into();
+        if let Some(redis) = &self.redis {
+            redis
+                .queue_push(&queue, &value)
+                .expect("redis queue_push failed");
+            return;
+        }
         self.inner
             .lock()
             .expect("memory store lock poisoned")
             .queues
-            .entry(queue.into())
+            .entry(queue)
             .or_default()
             .push_back(value);
     }
 
     pub fn queue_pop(&self, queue: &str) -> Option<serde_json::Value> {
+        if let Some(redis) = &self.redis {
+            return redis.queue_pop(queue).expect("redis queue_pop failed");
+        }
         self.inner
             .lock()
             .expect("memory store lock poisoned")
@@ -2068,13 +2217,22 @@ impl MemoryStore {
     }
 
     pub fn counter_add(&self, key: impl Into<String>, amount: i64) -> i64 {
+        let key = key.into();
+        if let Some(redis) = &self.redis {
+            return redis
+                .counter_add(&key, amount)
+                .expect("redis counter_add failed");
+        }
         let mut inner = self.inner.lock().expect("memory store lock poisoned");
-        let value = inner.counters.entry(key.into()).or_insert(0);
+        let value = inner.counters.entry(key).or_insert(0);
         *value += amount;
         *value
     }
 
     pub fn counter_get(&self, key: &str) -> i64 {
+        if let Some(redis) = &self.redis {
+            return redis.counter_get(key).expect("redis counter_get failed");
+        }
         *self
             .inner
             .lock()
@@ -2082,6 +2240,52 @@ impl MemoryStore {
             .counters
             .get(key)
             .unwrap_or(&0)
+    }
+
+    pub fn lock_acquire(&self, key: &str, token: &str, ttl_seconds: u64) -> bool {
+        if let Some(redis) = &self.redis {
+            return redis
+                .lock_acquire(key, token, ttl_seconds)
+                .expect("redis lock_acquire failed");
+        }
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        let now = current_epoch_seconds();
+        if inner
+            .locks
+            .get(key)
+            .is_some_and(|entry| entry.expires_at <= now)
+        {
+            inner.locks.remove(key);
+        }
+        if inner.locks.contains_key(key) {
+            return false;
+        }
+        inner.locks.insert(
+            key.into(),
+            LockEntry {
+                token: token.into(),
+                expires_at: now + ttl_seconds,
+            },
+        );
+        true
+    }
+
+    pub fn lock_release(&self, key: &str, token: &str) -> bool {
+        if let Some(redis) = &self.redis {
+            return redis
+                .lock_release(key, token)
+                .expect("redis lock_release failed");
+        }
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        if inner
+            .locks
+            .get(key)
+            .is_some_and(|entry| entry.token == token)
+        {
+            inner.locks.remove(key);
+            return true;
+        }
+        false
     }
 
     pub fn snapshot(&self) -> StoreSnapshot {
@@ -2662,16 +2866,14 @@ invariant "cron jobs have healthchecks"
             }
         );
         assert_eq!(artifacts.sql_plan.dialect, "mysql");
-        assert!(artifacts
-            .sql_plan
-            .tables
-            .iter()
-            .any(|table| table.table == "ChatSession"
+        assert!(artifacts.sql_plan.tables.iter().any(|table| {
+            table.table == "ChatSession"
                 && table.create_table.contains("CREATE TABLE `ChatSession`")
                 && table
                     .indexes
                     .iter()
-                    .any(|index| index.contains("idx_ChatSession_owner"))));
+                    .any(|index| index.contains("idx_ChatSession_owner"))
+        }));
         assert!(artifacts.sql_plan.queries.iter().any(|query| {
             query.table == "ChatSession"
                 && query.field == "owner"
@@ -3041,6 +3243,7 @@ invariant "cron jobs have healthchecks"
     fn memory_store_supports_cache_queues_and_counters() {
         let artifacts = compile_source(valid_program()).unwrap();
         let store = RuntimeApp::new(artifacts).store();
+        assert_eq!(store.primitive_backend(), "memory");
 
         store.cache_set("session:1", serde_json::json!({ "user": 1 }));
         assert_eq!(
@@ -3063,6 +3266,55 @@ invariant "cron jobs have healthchecks"
         assert_eq!(store.counter_add("api:127.0.0.1:gpt-5", 1), 1);
         assert_eq!(store.counter_add("api:127.0.0.1:gpt-5", 4), 5);
         assert_eq!(store.counter_get("api:127.0.0.1:gpt-5"), 5);
+
+        assert!(store.lock_acquire("billing:user-1", "worker-a", 30));
+        assert!(!store.lock_acquire("billing:user-1", "worker-b", 30));
+        assert!(!store.lock_release("billing:user-1", "worker-b"));
+        assert!(store.lock_release("billing:user-1", "worker-a"));
+        assert!(store.lock_acquire("billing:user-1", "worker-b", 30));
+    }
+
+    #[test]
+    fn redis_store_supports_cache_queues_counters_and_locks_when_configured() {
+        let Ok(redis_url) = std::env::var("REDIS_URL") else {
+            return;
+        };
+        let artifacts = compile_source(valid_program()).unwrap();
+        let store = RuntimeApp::with_redis(artifacts, &redis_url)
+            .unwrap()
+            .store();
+        assert_eq!(store.primitive_backend(), "redis");
+        let suffix = format!("test:{}", std::process::id());
+
+        store.cache_set(
+            format!("{suffix}:session"),
+            serde_json::json!({ "user": 42 }),
+        );
+        assert_eq!(
+            store.cache_get(&format!("{suffix}:session")),
+            Some(serde_json::json!({ "user": 42 }))
+        );
+
+        store.queue_push(format!("{suffix}:jobs"), serde_json::json!({ "job": 1 }));
+        store.queue_push(format!("{suffix}:jobs"), serde_json::json!({ "job": 2 }));
+        assert_eq!(
+            store.queue_pop(&format!("{suffix}:jobs")),
+            Some(serde_json::json!({ "job": 1 }))
+        );
+        assert_eq!(
+            store.queue_pop(&format!("{suffix}:jobs")),
+            Some(serde_json::json!({ "job": 2 }))
+        );
+
+        assert_eq!(store.counter_add(format!("{suffix}:counter"), 2), 2);
+        assert_eq!(store.counter_add(format!("{suffix}:counter"), 3), 5);
+        assert_eq!(store.counter_get(&format!("{suffix}:counter")), 5);
+
+        assert!(store.lock_acquire(&format!("{suffix}:lock"), "worker-a", 30));
+        assert!(!store.lock_acquire(&format!("{suffix}:lock"), "worker-b", 30));
+        assert!(!store.lock_release(&format!("{suffix}:lock"), "worker-b"));
+        assert!(store.lock_release(&format!("{suffix}:lock"), "worker-a"));
+        assert!(store.lock_acquire(&format!("{suffix}:lock"), "worker-b", 30));
     }
 
     #[test]

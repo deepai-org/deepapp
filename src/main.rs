@@ -1,6 +1,8 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use deepapp::{compile_file, format_errors, parse, runtime_from_file};
+use deepapp::{
+    compile_file, format_errors, parse, runtime_from_file, runtime_from_file_with_redis,
+};
 use std::fs;
 use std::path::PathBuf;
 
@@ -36,6 +38,8 @@ enum Command {
         addr: String,
         #[arg(long)]
         snapshot: Option<PathBuf>,
+        #[arg(long, env = "REDIS_URL")]
+        redis_url: Option<String>,
     },
 }
 
@@ -94,8 +98,13 @@ fn main() -> anyhow::Result<()> {
             input,
             addr,
             snapshot,
+            redis_url,
         } => {
-            let runtime = runtime_from_file(&input)?;
+            let runtime = if let Some(redis_url) = redis_url {
+                runtime_from_file_with_redis(&input, &redis_url)?
+            } else {
+                runtime_from_file(&input)?
+            };
             if let Some(snapshot) = snapshot {
                 runtime.serve_with_snapshot(&addr, &snapshot)
             } else {

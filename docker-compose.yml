@@ -17,7 +17,16 @@ services:
       - .:/workspace
     ports:
       - "8080:8080"
+    environment:
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - redis
     command: ["run", "examples/chat.deep", "--addr", "0.0.0.0:8080", "--snapshot", "build/runtime-snapshot.json"]
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
 
   test:
     image: rust:1.95-slim
