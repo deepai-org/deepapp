@@ -23,6 +23,7 @@ Objective: implement DeepApp design v2 with a Docker-first workflow, TDD, and cl
 - Model/provider catalog for `model_config` declarations with deterministic runtime resolution and provider fallback.
 - Pricing catalog for `pricing` declarations with deterministic runtime usage charging.
 - Task runner slice for cron, daemon, and worker declarations with deterministic runtime ticks.
+- Task-level lock execution for cron, daemon, and worker ticks using parsed lock names and TTLs.
 - Representative DeepApp v2 source file.
 - Unit and CLI tests that encode compiler behavior before relying on implementation output.
 
@@ -45,7 +46,7 @@ Objective: implement DeepApp design v2 with a Docker-first workflow, TDD, and cl
   - Model tests cover model catalog parsing, default model fallback, and provider failover.
   - Pricing tests cover catalog parsing, default model fallback, chat endpoint charge metadata, and usage cent counters.
   - Migration tests cover pre-deploy ordering, online/resumable metadata, checkpoint keys, and generated DDL presence.
-  - Task-runner tests cover cron/daemon ticks, worker job processing, task counters, task events, and worker result queues.
+  - Task-runner tests cover cron/daemon ticks, worker job processing, task counters, task events, worker result queues, and skip behavior when a declared task lock is held.
   - `tests/cli.rs` verifies the CLI writes all expected build artifacts.
 - Language design coverage:
   - `examples/chat.deep` includes module, types, identity, model config, notification channels, data, queue, cache, cached function, counter, topic, pricing, storage, functions, worker, endpoints, page, cron, daemon, services, CDN, deploy rules, and invariants.
@@ -55,7 +56,7 @@ Objective: implement DeepApp design v2 with a Docker-first workflow, TDD, and cl
   - `build/sql-plan.json` records MySQL table DDL, index DDL, and indexed query plans derived from `data` declarations and handler query expressions.
   - `build/frontend-assets.json` records page assets generated from `view` blocks, including cache policy, API base URL, and client-fetch data-loading metadata.
   - `build/storage-catalog.json` records data schemas, fields, indexes, and privacy/security flags used by the runtime store.
-  - `build/task-catalog.json` records cron, daemon, and worker execution metadata.
+  - `build/task-catalog.json` records cron, daemon, and worker execution metadata, including parsed lock names and lock TTLs.
   - `build/model-catalog.json` records model configs, providers, reasoning effort, and cost metadata.
   - `build/pricing-catalog.json` records category/model prices in cents.
   - `build/redis-catalog.json` records Redis primitive backends, TTLs, and sorted queue order fields derived from `queue`, `cache`, `cached fn`, `counter`, and `topic` declarations.
@@ -83,7 +84,8 @@ Objective: implement DeepApp design v2 with a Docker-first workflow, TDD, and cl
   - `docker compose run --rm compiler migrate examples/chat.deep --preview`
   - `docker compose up -d runtime` plus HTTP smoke checks, followed by `docker compose down`
   - `docker compose up -d runtime` with Redis-backed endpoint smoke checks, direct Redis key inspection, sorted-set type check, and TTL checks, followed by `docker compose down`
+  - `docker compose up -d runtime` with a pre-held Redis task lock and `/__deep/task-tick` smoke check, followed by `docker compose down`
 
 ## Current Limits
 
-This is a working compiler and runtime prototype, not a complete production implementation of every DeepApp v2 runtime promise. It does not yet interpret arbitrary DeepApp handler bodies beyond simple return objects plus native example handlers, emit machine code, provide an always-on durable storage service, render full reactive browser behavior from `view` blocks, execute real scheduled background loops, or call real providers such as Stripe/OpenAI/AWS. SQL and migration output are MySQL-oriented planning artifacts, not a live database backend, live migration runner, or complete optimizer. Streaming routes use SSE/chunked transfer, but their chunks are deterministic prototype payloads rather than provider-backed token streams. Frontend assets carry CDN/cache/API metadata, but there is not yet a real reactive browser data-loading runtime. Identity is represented by deterministic request classification from headers, not real user/session lookup. Redis can back cache values with declared TTLs, FIFO/sorted-set queues, counters, and TTL locks, but pub/sub execution and full `with lock ...` handler interpretation remain incomplete. Rate limiting uses the configured counter backend, but without stale-bucket cleanup or a production policy engine. Pricing is represented as deterministic catalog lookup and usage counters, not a real billing ledger or payment integration. Those remain future implementation work beyond the compiler, HTTP runtime, SQL/migration planning artifacts, frontend asset, native example handlers, endpoint policy slice, simple handler interpreter, model/provider catalog, pricing slice, task-runner tick, in-memory storage/cache/queue, Redis primitive backend, and snapshot slice represented here.
+This is a working compiler and runtime prototype, not a complete production implementation of every DeepApp v2 runtime promise. It does not yet interpret arbitrary DeepApp handler bodies beyond simple return objects plus native example handlers, emit machine code, provide an always-on durable storage service, render full reactive browser behavior from `view` blocks, execute real scheduled background loops, or call real providers such as Stripe/OpenAI/AWS. SQL and migration output are MySQL-oriented planning artifacts, not a live database backend, live migration runner, or complete optimizer. Streaming routes use SSE/chunked transfer, but their chunks are deterministic prototype payloads rather than provider-backed token streams. Frontend assets carry CDN/cache/API metadata, but there is not yet a real reactive browser data-loading runtime. Identity is represented by deterministic request classification from headers, not real user/session lookup. Redis can back cache values with declared TTLs, FIFO/sorted-set queues, counters, and TTL locks, and task ticks acquire parsed cron/daemon/worker locks before running, but pub/sub execution and endpoint handler-level `with lock ...` interpretation remain incomplete. Rate limiting uses the configured counter backend, but without stale-bucket cleanup or a production policy engine. Pricing is represented as deterministic catalog lookup and usage counters, not a real billing ledger or payment integration. Those remain future implementation work beyond the compiler, HTTP runtime, SQL/migration planning artifacts, frontend asset, native example handlers, endpoint policy slice, simple handler interpreter, model/provider catalog, pricing slice, task-runner tick, in-memory storage/cache/queue, Redis primitive backend, and snapshot slice represented here.

@@ -6,6 +6,8 @@
     "runtime": null,
     "healthcheck": true,
     "lock": true,
+    "lock_name": "daily_billing",
+    "lock_ttl_seconds": 1800,
     "on_error": true
   },
   {
@@ -15,6 +17,8 @@
     "runtime": "280s",
     "healthcheck": true,
     "lock": true,
+    "lock_name": "chat_task_checker",
+    "lock_ttl_seconds": null,
     "on_error": true
   },
   {
@@ -24,6 +28,8 @@
     "runtime": null,
     "healthcheck": false,
     "lock": true,
+    "lock_name": "stable_diffusion",
+    "lock_ttl_seconds": 300,
     "on_error": true
   }
 ]

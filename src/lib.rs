@@ -102,6 +102,8 @@ pub struct CronDecl {
     pub schedule: Option<String>,
     pub has_healthcheck: bool,
     pub has_lock: bool,
+    pub lock_name: Option<String>,
+    pub lock_ttl_seconds: Option<u64>,
     pub has_error_handler: bool,
 }
 
@@ -112,6 +114,8 @@ pub struct DaemonDecl {
     pub runtime: Option<String>,
     pub has_healthcheck: bool,
     pub has_lock: bool,
+    pub lock_name: Option<String>,
+    pub lock_ttl_seconds: Option<u64>,
     pub has_error_handler: bool,
 }
 
@@ -324,6 +328,8 @@ pub struct TaskSpec {
     pub runtime: Option<String>,
     pub healthcheck: bool,
     pub lock: bool,
+    pub lock_name: Option<String>,
+    pub lock_ttl_seconds: Option<u64>,
     pub on_error: bool,
 }
 
@@ -1020,6 +1026,8 @@ fn parse_cron(header: &str, body: &str) -> CronDecl {
         schedule: quoted_after(header, "schedule"),
         has_healthcheck: body.contains("healthcheck:"),
         has_lock: body.contains("with lock"),
+        lock_name: parse_lock_name(body),
+        lock_ttl_seconds: parse_lock_ttl_seconds(body),
         has_error_handler: body.contains("on error"),
     }
 }
@@ -1040,8 +1048,24 @@ fn parse_daemon(header: &str, body: &str) -> DaemonDecl {
         runtime,
         has_healthcheck: body.contains("healthcheck:"),
         has_lock: body.contains("with lock"),
+        lock_name: parse_lock_name(body),
+        lock_ttl_seconds: parse_lock_ttl_seconds(body),
         has_error_handler: body.contains("on error"),
     }
+}
+
+fn parse_lock_name(body: &str) -> Option<String> {
+    Regex::new(r"with\s+lock\s+([A-Za-z][A-Za-z0-9_\-.]*)")
+        .unwrap()
+        .captures(body)
+        .and_then(|caps| caps.get(1))
+        .map(|m| m.as_str().to_string())
+}
+
+fn parse_lock_ttl_seconds(body: &str) -> Option<u64> {
+    let re = Regex::new(r"timeout\s+(\d+)\s*([smhd])").unwrap();
+    let caps = re.captures(body)?;
+    duration_seconds(caps.get(1)?.as_str().parse().ok()?, caps.get(2)?.as_str())
 }
 
 fn quoted_after(text: &str, key: &str) -> Option<String> {
@@ -1322,13 +1346,16 @@ fn parse_ttl_seconds(source: &str) -> Option<u64> {
     let re = Regex::new(r"ttl:?\s*(\d+)\s*([smhd])").unwrap();
     let caps = re.captures(source)?;
     let amount: u64 = caps.get(1)?.as_str().parse().ok()?;
-    let unit = caps.get(2)?.as_str();
+    duration_seconds(amount, caps.get(2)?.as_str())
+}
+
+fn duration_seconds(amount: u64, unit: &str) -> Option<u64> {
     Some(match unit {
         "s" => amount,
         "m" => amount * 60,
         "h" => amount * 60 * 60,
         "d" => amount * 24 * 60 * 60,
-        _ => amount,
+        _ => return None,
     })
 }
 
@@ -1775,6 +1802,8 @@ fn compile_task_catalog(program: &Program) -> Vec<TaskSpec> {
         runtime: None,
         healthcheck: cron.has_healthcheck,
         lock: cron.has_lock,
+        lock_name: cron.lock_name.clone(),
+        lock_ttl_seconds: cron.lock_ttl_seconds,
         on_error: cron.has_error_handler,
     }));
     tasks.extend(program.daemons.iter().map(|daemon| TaskSpec {
@@ -1784,6 +1813,8 @@ fn compile_task_catalog(program: &Program) -> Vec<TaskSpec> {
         runtime: daemon.runtime.clone(),
         healthcheck: daemon.has_healthcheck,
         lock: daemon.has_lock,
+        lock_name: daemon.lock_name.clone(),
+        lock_ttl_seconds: daemon.lock_ttl_seconds,
         on_error: daemon.has_error_handler,
     }));
     tasks.extend(
@@ -1798,6 +1829,8 @@ fn compile_task_catalog(program: &Program) -> Vec<TaskSpec> {
                 runtime: None,
                 healthcheck: false,
                 lock: true,
+                lock_name: Some(worker.name.clone()),
+                lock_ttl_seconds: Some(300),
                 on_error: true,
             }),
     );
@@ -2188,6 +2221,27 @@ fn resolve_model_from_catalog(
 }
 
 fn run_task(task: &TaskSpec, store: &MemoryStore) -> TaskRun {
+    let lock_token = format!("task:{}:{}", task.name, current_epoch_seconds());
+    let lock_name = task
+        .lock_name
+        .as_deref()
+        .filter(|name| !name.is_empty())
+        .or_else(|| task.lock.then_some(task.name.as_str()));
+    if let Some(lock_name) = lock_name {
+        let ttl_seconds = task.lock_ttl_seconds.unwrap_or(300);
+        if !store.lock_acquire(lock_name, &lock_token, ttl_seconds) {
+            return TaskRun {
+                name: task.name.clone(),
+                kind: task.kind.clone(),
+                status: "locked".into(),
+                detail: format!(
+                    "task {} skipped because lock {lock_name} is held",
+                    task.name
+                ),
+            };
+        }
+    }
+
     store.counter_add(format!("task:{}:runs", task.name), 1);
     let detail = match task.kind {
         TaskKind::Cron => {
@@ -2227,6 +2281,9 @@ fn run_task(task: &TaskSpec, store: &MemoryStore) -> TaskRun {
             message
         }
     };
+    if let Some(lock_name) = lock_name {
+        store.lock_release(lock_name, &lock_token);
+    }
     TaskRun {
         name: task.name.clone(),
         kind: task.kind.clone(),
@@ -3161,11 +3218,17 @@ invariant "cron jobs have healthchecks"
         assert!(artifacts
             .task_catalog
             .iter()
-            .any(|task| task.name == "daily_billing" && task.kind == TaskKind::Cron));
+            .any(|task| task.name == "daily_billing"
+                && task.kind == TaskKind::Cron
+                && task.lock_name.as_deref() == Some("daily_billing")
+                && task.lock_ttl_seconds.is_none()));
         assert!(artifacts
             .task_catalog
             .iter()
-            .any(|task| task.name == "chat_task_checker" && task.kind == TaskKind::Daemon));
+            .any(|task| task.name == "chat_task_checker"
+                && task.kind == TaskKind::Daemon
+                && task.lock_name.as_deref() == Some("chat_task_checker")
+                && task.lock_ttl_seconds.is_none()));
         assert!(artifacts
             .task_catalog
             .iter()
@@ -3734,5 +3797,23 @@ invariant "cron jobs have healthchecks"
                 .unwrap()["status"],
             serde_json::json!("done")
         );
+    }
+
+    #[test]
+    fn runtime_task_tick_skips_jobs_when_declared_lock_is_held() {
+        let artifacts = compile_source(valid_program()).unwrap();
+        let runtime = RuntimeApp::new(artifacts);
+        assert!(runtime
+            .store()
+            .lock_acquire("daily_billing", "external-runner", 1800));
+
+        let runs = runtime.run_task_tick();
+        let daily_billing = runs.iter().find(|run| run.name == "daily_billing").unwrap();
+        assert_eq!(daily_billing.status, "locked");
+        assert!(daily_billing.detail.contains("lock daily_billing is held"));
+        assert_eq!(runtime.store().counter_get("task:daily_billing:runs"), 0);
+        assert!(runtime
+            .store()
+            .lock_release("daily_billing", "external-runner"));
     }
 }

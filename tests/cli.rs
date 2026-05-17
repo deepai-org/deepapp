@@ -46,6 +46,8 @@ fn cli_builds_example_artifacts() {
     assert!(frontend_assets.contains("\"data_loading\": \"client_fetch\""));
     let task_catalog = fs::read_to_string(temp.join("task-catalog.json")).unwrap();
     assert!(task_catalog.contains("\"name\": \"daily_billing\""));
+    assert!(task_catalog.contains("\"lock_name\": \"daily_billing\""));
+    assert!(task_catalog.contains("\"lock_ttl_seconds\": 1800"));
     let model_catalog = fs::read_to_string(temp.join("model-catalog.json")).unwrap();
     assert!(model_catalog.contains("\"name\": \"gpt-4.1-nano\""));
     let pricing_catalog = fs::read_to_string(temp.join("pricing-catalog.json")).unwrap();
