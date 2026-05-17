@@ -73,6 +73,7 @@ fn main() -> anyhow::Result<()> {
             write_json(out.join("task-catalog.json"), &artifacts.task_catalog)?;
             write_json(out.join("model-catalog.json"), &artifacts.model_catalog)?;
             write_json(out.join("pricing-catalog.json"), &artifacts.pricing_catalog)?;
+            write_json(out.join("redis-catalog.json"), &artifacts.redis_catalog)?;
             println!("DeepApp build wrote {}", out.display());
             Ok(())
         }

@@ -62,6 +62,7 @@ The build writes JSON files that describe the app:
 - `task-catalog.json`: cron, daemon, and worker metadata.
 - `model-catalog.json`: model provider metadata.
 - `pricing-catalog.json`: category/model prices in cents.
+- `redis-catalog.json`: Redis primitive backends, TTLs, and sorted queue order fields.
 
 Inspect one artifact:
 
@@ -129,7 +130,7 @@ docker compose run --rm compiler run examples/chat.deep \
   --redis-url redis://redis:6379
 ```
 
-With Redis configured, cache values are stored as Redis strings, queues use FIFO Redis lists, counters use atomic increments, and locks use token-checked `SET NX EX` acquisition.
+With Redis configured, cache values are stored as Redis strings with declared TTLs, queues use FIFO Redis lists or sorted sets based on `sorted_by`, counters use atomic increments, and locks use token-checked `SET NX EX` acquisition.
 
 Resolve a model through the runtime catalog:
 
@@ -219,6 +220,6 @@ This exercises cron, daemon, and worker metadata without starting real long-runn
 
 ## What To Expect From The Prototype
 
-Implemented prototype behavior includes parsing, static checks, artifact generation, generated page HTML, endpoint routing, metadata routes, in-memory storage, Redis-backed cache/queues/counters/locks when configured, snapshots, endpoint identity policy, rate limits, model resolution, pricing, and deterministic task ticks.
+Implemented prototype behavior includes parsing, static checks, artifact generation, generated page HTML, endpoint routing, metadata routes, in-memory storage, Redis-backed cache/queues/counters/locks when configured, declared Redis TTL and sorted-queue metadata, snapshots, endpoint identity policy, rate limits, model resolution, pricing, and deterministic task ticks.
 
-Not yet production-grade: arbitrary handler execution, real user/session authentication, sorted-set queues, pub/sub, declaration-derived Redis TTLs, distributed rate-limit cleanup/policy, real billing, provider calls, reactive browser behavior, real scheduled background loops, and always-on durable storage services.
+Not yet production-grade: arbitrary handler execution, real user/session authentication, pub/sub execution, full `with lock ...` handler interpretation, distributed rate-limit cleanup/policy, real billing, provider calls, reactive browser behavior, real scheduled background loops, and always-on durable storage services.

@@ -27,6 +27,7 @@ pub struct Program {
     pub pricing_catalog: Vec<PricingRule>,
     pub deploy_rules: Option<DeployRules>,
     pub sources: Vec<SourceFinding>,
+    pub redis_primitives: Vec<RedisPrimitiveSpec>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -161,6 +162,7 @@ pub struct BuildArtifacts {
     pub task_catalog: Vec<TaskSpec>,
     pub model_catalog: Vec<ModelSpec>,
     pub pricing_catalog: Vec<PricingRule>,
+    pub redis_catalog: Vec<RedisPrimitiveSpec>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -209,6 +211,15 @@ pub struct PricingRule {
     pub category: String,
     pub model: String,
     pub cents: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RedisPrimitiveSpec {
+    pub kind: String,
+    pub name: String,
+    pub ttl_seconds: Option<u64>,
+    pub queue_order: Option<String>,
+    pub backend: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -358,6 +369,7 @@ pub type JsonRecord = BTreeMap<String, serde_json::Value>;
 pub struct MemoryStore {
     inner: Arc<Mutex<StoreInner>>,
     redis: Option<RedisPrimitiveStore>,
+    primitives: Vec<RedisPrimitiveSpec>,
 }
 
 #[derive(Debug, Clone)]
@@ -414,10 +426,20 @@ impl RedisPrimitiveStore {
         Ok(())
     }
 
-    fn cache_set(&self, key: &str, value: &serde_json::Value) -> anyhow::Result<()> {
+    fn cache_set(
+        &self,
+        key: &str,
+        value: &serde_json::Value,
+        ttl_seconds: Option<u64>,
+    ) -> anyhow::Result<()> {
         let mut connection = self.connection()?;
         let encoded = serde_json::to_string(value)?;
-        connection.set::<_, _, ()>(self.key("cache", key), encoded)?;
+        let redis_key = self.key("cache", key);
+        if let Some(ttl) = ttl_seconds {
+            connection.set_ex::<_, _, ()>(redis_key, encoded, ttl)?;
+        } else {
+            connection.set::<_, _, ()>(redis_key, encoded)?;
+        }
         Ok(())
     }
 
@@ -429,16 +451,46 @@ impl RedisPrimitiveStore {
             .transpose()
     }
 
-    fn queue_push(&self, queue: &str, value: &serde_json::Value) -> anyhow::Result<()> {
+    fn queue_push(
+        &self,
+        queue: &str,
+        value: &serde_json::Value,
+        spec: Option<&RedisPrimitiveSpec>,
+    ) -> anyhow::Result<()> {
         let mut connection = self.connection()?;
         let encoded = serde_json::to_string(value)?;
-        connection.rpush::<_, _, usize>(self.key("queue", queue), encoded)?;
+        let redis_key = self.key("queue", queue);
+        if spec.and_then(|spec| spec.queue_order.as_ref()).is_some() {
+            let score = redis_queue_score(value, spec.and_then(|spec| spec.queue_order.as_deref()));
+            redis::cmd("ZADD")
+                .arg(&redis_key)
+                .arg(score)
+                .arg(encoded)
+                .query::<usize>(&mut connection)?;
+        } else {
+            connection.rpush::<_, _, usize>(&redis_key, encoded)?;
+        }
+        if let Some(ttl) = spec.and_then(|spec| spec.ttl_seconds) {
+            connection.expire::<_, ()>(&redis_key, ttl as i64)?;
+        }
         Ok(())
     }
 
-    fn queue_pop(&self, queue: &str) -> anyhow::Result<Option<serde_json::Value>> {
+    fn queue_pop(
+        &self,
+        queue: &str,
+        spec: Option<&RedisPrimitiveSpec>,
+    ) -> anyhow::Result<Option<serde_json::Value>> {
         let mut connection = self.connection()?;
-        let encoded: Option<String> = connection.lpop(self.key("queue", queue), None)?;
+        let encoded: Option<String> = if spec.and_then(|spec| spec.queue_order.as_ref()).is_some() {
+            let values: Vec<(String, f64)> = redis::cmd("ZPOPMIN")
+                .arg(self.key("queue", queue))
+                .arg(1)
+                .query(&mut connection)?;
+            values.into_iter().next().map(|(value, _)| value)
+        } else {
+            connection.lpop(self.key("queue", queue), None)?
+        };
         encoded
             .map(|value| serde_json::from_str(&value).map_err(Into::into))
             .transpose()
@@ -477,6 +529,20 @@ impl RedisPrimitiveStore {
         .invoke(&mut connection)?;
         Ok(deleted == 1)
     }
+}
+
+fn redis_queue_score(value: &serde_json::Value, order_field: Option<&str>) -> f64 {
+    order_field
+        .and_then(|field| value.get(field))
+        .and_then(|value| {
+            value.as_f64().or_else(|| {
+                value
+                    .as_str()
+                    .and_then(|text| text.parse::<f64>().ok())
+                    .or_else(|| Some(current_epoch_seconds() as f64))
+            })
+        })
+        .unwrap_or_else(|| current_epoch_seconds() as f64)
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -561,6 +627,7 @@ pub fn parse(source: &str) -> Result<Program, DeepError> {
         pricing_catalog: Vec::new(),
         deploy_rules: None,
         sources: Vec::new(),
+        redis_primitives: Vec::new(),
     };
 
     let lines: Vec<&str> = source.lines().collect();
@@ -658,6 +725,76 @@ pub fn parse(source: &str) -> Result<Program, DeepError> {
             let (_, body, next) = capture_block(&lines, i)?;
             program.notification_channels = parse_notification_channels(&body);
             i = next;
+        } else if line.starts_with("queue ") {
+            let (header, body, next) = if line.contains('{') {
+                capture_block(&lines, i)?
+            } else {
+                (line.clone(), String::new(), i + 1)
+            };
+            let decl = parse_redis_primitive("queue", &header, &body);
+            program.sources.push(SourceFinding {
+                kind: "queue".into(),
+                name: decl.name.clone(),
+            });
+            program.declarations.push(LanguageDecl {
+                kind: "queue".into(),
+                name: decl.name.clone(),
+            });
+            program.redis_primitives.push(decl);
+            i = next;
+        } else if line.starts_with("cache ") {
+            let (header, body, next) = if line.contains('{') {
+                capture_block(&lines, i)?
+            } else {
+                (line.clone(), String::new(), i + 1)
+            };
+            let decl = parse_redis_primitive("cache", &header, &body);
+            program.sources.push(SourceFinding {
+                kind: "cache".into(),
+                name: decl.name.clone(),
+            });
+            program.declarations.push(LanguageDecl {
+                kind: "cache".into(),
+                name: decl.name.clone(),
+            });
+            program.redis_primitives.push(decl);
+            i = next;
+        } else if line.starts_with("cached fn ") {
+            let decl = parse_redis_primitive("cached_fn", &line, "");
+            program.sources.push(SourceFinding {
+                kind: "cached_fn".into(),
+                name: decl.name.clone(),
+            });
+            program.declarations.push(LanguageDecl {
+                kind: "cached_fn".into(),
+                name: decl.name.clone(),
+            });
+            program.redis_primitives.push(decl);
+            i += 1;
+        } else if line.starts_with("topic ") {
+            let decl = parse_redis_primitive("topic", &line, "");
+            program.sources.push(SourceFinding {
+                kind: "topic".into(),
+                name: decl.name.clone(),
+            });
+            program.declarations.push(LanguageDecl {
+                kind: "topic".into(),
+                name: decl.name.clone(),
+            });
+            program.redis_primitives.push(decl);
+            i += 1;
+        } else if line.starts_with("counter ") {
+            let decl = parse_redis_primitive("counter", &line, "");
+            program.sources.push(SourceFinding {
+                kind: "counter".into(),
+                name: decl.name.clone(),
+            });
+            program.declarations.push(LanguageDecl {
+                kind: "counter".into(),
+                name: decl.name.clone(),
+            });
+            program.redis_primitives.push(decl);
+            i += 1;
         } else if line.starts_with("invariant ") {
             program.invariants.push(line);
             i += 1;
@@ -1142,6 +1279,59 @@ fn parse_notification_channels(body: &str) -> BTreeSet<String> {
         .collect()
 }
 
+fn parse_redis_primitive(kind: &str, header: &str, body: &str) -> RedisPrimitiveSpec {
+    let name = match kind {
+        "cached_fn" => Regex::new(r"^cached\s+fn\s+([A-Za-z][A-Za-z0-9_]*)")
+            .unwrap()
+            .captures(header)
+            .and_then(|caps| caps.get(1))
+            .map(|m| m.as_str().to_string()),
+        _ => Regex::new(&format!(r"^{}\s+([A-Za-z][A-Za-z0-9_]*)", kind))
+            .unwrap()
+            .captures(header)
+            .and_then(|caps| caps.get(1))
+            .map(|m| m.as_str().to_string()),
+    }
+    .unwrap_or_else(|| kind.to_string());
+    let combined = format!("{header}\n{body}");
+    RedisPrimitiveSpec {
+        kind: kind.into(),
+        name,
+        ttl_seconds: parse_ttl_seconds(&combined),
+        queue_order: if kind == "queue" {
+            Regex::new(r"sorted_by\s+([A-Za-z][A-Za-z0-9_]*)")
+                .unwrap()
+                .captures(&combined)
+                .and_then(|caps| caps.get(1))
+                .map(|m| m.as_str().to_string())
+        } else {
+            None
+        },
+        backend: match kind {
+            "topic" => "redis_pubsub",
+            "queue" if combined.contains("sorted_by") => "redis_sorted_set",
+            "queue" => "redis_list",
+            "counter" => "redis_counter",
+            _ => "redis_string",
+        }
+        .into(),
+    }
+}
+
+fn parse_ttl_seconds(source: &str) -> Option<u64> {
+    let re = Regex::new(r"ttl:?\s*(\d+)\s*([smhd])").unwrap();
+    let caps = re.captures(source)?;
+    let amount: u64 = caps.get(1)?.as_str().parse().ok()?;
+    let unit = caps.get(2)?.as_str();
+    Some(match unit {
+        "s" => amount,
+        "m" => amount * 60,
+        "h" => amount * 60 * 60,
+        "d" => amount * 24 * 60 * 60,
+        _ => amount,
+    })
+}
+
 fn parse_language_decl(line: &str) -> Option<LanguageDecl> {
     let patterns = [
         ("cached fn", "cached_fn"),
@@ -1572,6 +1762,7 @@ pub fn generate(program: &Program) -> BuildArtifacts {
         task_catalog: compile_task_catalog(program),
         model_catalog: program.model_catalog.clone(),
         pricing_catalog: program.pricing_catalog.clone(),
+        redis_catalog: program.redis_primitives.clone(),
     }
 }
 
@@ -1737,12 +1928,19 @@ fn route_target(services: &[ServicePlan], path: &str) -> String {
 
 impl RuntimeApp {
     pub fn new(artifacts: BuildArtifacts) -> Self {
-        let store = MemoryStore::new(artifacts.storage_catalog.clone());
+        let store = MemoryStore::new_with_primitives(
+            artifacts.storage_catalog.clone(),
+            artifacts.redis_catalog.clone(),
+        );
         Self { artifacts, store }
     }
 
     pub fn with_redis(artifacts: BuildArtifacts, redis_url: &str) -> anyhow::Result<Self> {
-        let store = MemoryStore::with_redis(artifacts.storage_catalog.clone(), redis_url)?;
+        let store = MemoryStore::with_redis(
+            artifacts.storage_catalog.clone(),
+            artifacts.redis_catalog.clone(),
+            redis_url,
+        )?;
         Ok(Self { artifacts, store })
     }
 
@@ -2039,6 +2237,13 @@ fn run_task(task: &TaskSpec, store: &MemoryStore) -> TaskRun {
 
 impl MemoryStore {
     pub fn new(catalog: Vec<DataDecl>) -> Self {
+        Self::new_with_primitives(catalog, Vec::new())
+    }
+
+    pub fn new_with_primitives(
+        catalog: Vec<DataDecl>,
+        primitives: Vec<RedisPrimitiveSpec>,
+    ) -> Self {
         let schemas = catalog
             .into_iter()
             .map(|schema| (schema.name.clone(), schema))
@@ -2059,11 +2264,16 @@ impl MemoryStore {
                 locks: BTreeMap::new(),
             })),
             redis: None,
+            primitives,
         }
     }
 
-    pub fn with_redis(catalog: Vec<DataDecl>, redis_url: &str) -> anyhow::Result<Self> {
-        let mut store = Self::new(catalog);
+    pub fn with_redis(
+        catalog: Vec<DataDecl>,
+        primitives: Vec<RedisPrimitiveSpec>,
+        redis_url: &str,
+    ) -> anyhow::Result<Self> {
+        let mut store = Self::new_with_primitives(catalog, primitives);
         let redis = RedisPrimitiveStore::new(redis_url, "runtime")?;
         redis.ping()?;
         store.redis = Some(redis);
@@ -2076,6 +2286,23 @@ impl MemoryStore {
         } else {
             "memory"
         }
+    }
+
+    fn primitive_spec(&self, kind: &str, name: &str) -> Option<&RedisPrimitiveSpec> {
+        self.primitives
+            .iter()
+            .find(|spec| spec.kind == kind && spec.name == name)
+    }
+
+    fn cache_ttl_seconds(&self, key: &str) -> Option<u64> {
+        self.primitives.iter().find_map(|spec| {
+            let cache_like = spec.kind == "cache" || spec.kind == "cached_fn";
+            if cache_like && (key == spec.name || key.starts_with(&format!("{}:", spec.name))) {
+                spec.ttl_seconds
+            } else {
+                None
+            }
+        })
     }
 
     pub fn create(&self, data: &str, mut record: JsonRecord) -> Result<u64, StoreError> {
@@ -2163,8 +2390,9 @@ impl MemoryStore {
     pub fn cache_set(&self, key: impl Into<String>, value: serde_json::Value) {
         let key = key.into();
         if let Some(redis) = &self.redis {
+            let ttl_seconds = self.cache_ttl_seconds(&key);
             redis
-                .cache_set(&key, &value)
+                .cache_set(&key, &value, ttl_seconds)
                 .expect("redis cache_set failed");
             return;
         }
@@ -2190,8 +2418,9 @@ impl MemoryStore {
     pub fn queue_push(&self, queue: impl Into<String>, value: serde_json::Value) {
         let queue = queue.into();
         if let Some(redis) = &self.redis {
+            let spec = self.primitive_spec("queue", &queue);
             redis
-                .queue_push(&queue, &value)
+                .queue_push(&queue, &value, spec)
                 .expect("redis queue_push failed");
             return;
         }
@@ -2206,7 +2435,10 @@ impl MemoryStore {
 
     pub fn queue_pop(&self, queue: &str) -> Option<serde_json::Value> {
         if let Some(redis) = &self.redis {
-            return redis.queue_pop(queue).expect("redis queue_pop failed");
+            let spec = self.primitive_spec("queue", queue);
+            return redis
+                .queue_pop(queue, spec)
+                .expect("redis queue_pop failed");
         }
         self.inner
             .lock()
@@ -2853,6 +3085,23 @@ invariant "cron jobs have healthchecks"
         assert_eq!(artifacts.report.language_units["queue"], 1);
         assert_eq!(artifacts.report.language_units["worker"], 1);
         assert_eq!(artifacts.report.language_units["model_config"], 1);
+        assert!(artifacts.redis_catalog.iter().any(|primitive| {
+            primitive.kind == "queue"
+                && primitive.name == "research_tasks"
+                && primitive.ttl_seconds == Some(3600)
+                && primitive.queue_order.as_deref() == Some("created_at")
+                && primitive.backend == "redis_sorted_set"
+        }));
+        assert!(artifacts.redis_catalog.iter().any(|primitive| {
+            primitive.kind == "cached_fn"
+                && primitive.name == "research_status"
+                && primitive.ttl_seconds == Some(3600)
+        }));
+        assert!(artifacts.redis_catalog.iter().any(|primitive| {
+            primitive.kind == "topic"
+                && primitive.name == "model_updates"
+                && primitive.backend == "redis_pubsub"
+        }));
         assert_eq!(artifacts.model_catalog.len(), 1);
         assert_eq!(artifacts.model_catalog[0].name, "gpt-4.1-nano");
         assert_eq!(artifacts.model_catalog[0].providers, vec!["openai.chat"]);
@@ -3279,31 +3528,36 @@ invariant "cron jobs have healthchecks"
         let Ok(redis_url) = std::env::var("REDIS_URL") else {
             return;
         };
-        let artifacts = compile_source(valid_program()).unwrap();
+        let suffix = format!("test_{}", std::process::id());
+        let queue_name = format!("{suffix}_jobs");
+        let cache_name = format!("{suffix}_cache");
+        let source = format!(
+            "module redis.test\nqueue {queue_name}: Job sorted_by score {{ ttl: 1h }}\ncache {cache_name}[id: string] ttl 1h {{ type: Value }}\ncounter {suffix}_counter[id: string] window 60s\ntopic {suffix}_events: Event\ndata User {{ id: pk }}\n"
+        );
+        let artifacts = compile_source(&source).unwrap();
         let store = RuntimeApp::with_redis(artifacts, &redis_url)
             .unwrap()
             .store();
         assert_eq!(store.primitive_backend(), "redis");
-        let suffix = format!("test:{}", std::process::id());
 
         store.cache_set(
-            format!("{suffix}:session"),
+            format!("{cache_name}:session"),
             serde_json::json!({ "user": 42 }),
         );
         assert_eq!(
-            store.cache_get(&format!("{suffix}:session")),
+            store.cache_get(&format!("{cache_name}:session")),
             Some(serde_json::json!({ "user": 42 }))
         );
 
-        store.queue_push(format!("{suffix}:jobs"), serde_json::json!({ "job": 1 }));
-        store.queue_push(format!("{suffix}:jobs"), serde_json::json!({ "job": 2 }));
+        store.queue_push(&queue_name, serde_json::json!({ "job": 2, "score": 2 }));
+        store.queue_push(&queue_name, serde_json::json!({ "job": 1, "score": 1 }));
         assert_eq!(
-            store.queue_pop(&format!("{suffix}:jobs")),
-            Some(serde_json::json!({ "job": 1 }))
+            store.queue_pop(&queue_name),
+            Some(serde_json::json!({ "job": 1, "score": 1 }))
         );
         assert_eq!(
-            store.queue_pop(&format!("{suffix}:jobs")),
-            Some(serde_json::json!({ "job": 2 }))
+            store.queue_pop(&queue_name),
+            Some(serde_json::json!({ "job": 2, "score": 2 }))
         );
 
         assert_eq!(store.counter_add(format!("{suffix}:counter"), 2), 2);

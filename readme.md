@@ -13,7 +13,7 @@ This repository currently contains a Rust implementation of a compiler frontend,
 - Serve `response: stream` endpoints as Server-Sent Events over HTTP chunked transfer.
 - Generate CDN-aware frontend assets with cache policy, API base URL, and client-fetch data loading metadata.
 - Serve runtime metadata through `/__deep/*` routes.
-- Exercise in-memory storage, Redis-backed cache/queues/counters/locks, snapshots, model fallback, pricing, rate limiting, and deterministic task ticks.
+- Exercise in-memory storage, Redis-backed cache/queues/counters/locks with declared TTL and sorted-queue metadata, snapshots, model fallback, pricing, rate limiting, and deterministic task ticks.
 
 See [docs/coverage-audit.md](docs/coverage-audit.md) for the detailed implementation audit and [docs/user-tutorial.md](docs/user-tutorial.md) for a user walkthrough.
 
@@ -96,6 +96,7 @@ Running `deep build` writes these files into `build/`:
 - `task-catalog.json`: cron, daemon, and worker metadata.
 - `model-catalog.json`: model/provider metadata.
 - `pricing-catalog.json`: category/model prices in cents.
+- `redis-catalog.json`: Redis primitive backends, TTLs, and sorted queue order fields.
 
 ## Runtime Routes
 
@@ -176,7 +177,7 @@ Known gaps include:
 - Rate limiting uses the configured counter backend, but it still lacks stale-bucket cleanup and a production policy engine.
 - Pricing is catalog lookup plus counters, not a billing ledger or payment integration.
 - Storage is in-memory with snapshot support. The compiler emits a MySQL-oriented SQL plan, but it does not yet execute against an always-on durable database service.
-- Redis can back cache, FIFO queue, counter, and TTL lock primitives when configured, but sorted-set queues and pub/sub are not implemented yet.
+- Redis can back cache, FIFO queue, sorted-set queue, counter, and TTL lock primitives when configured. Pub/sub and full handler-level lock interpretation are not implemented yet.
 - Frontend output is CDN-aware generated HTML metadata, not a reactive browser runtime.
 - Cron, daemon, and worker behavior runs through deterministic ticks, not real schedulers.
 - External providers such as OpenAI, Stripe, AWS, and S3 are represented as metadata, not real calls.
@@ -213,7 +214,7 @@ These are blocking for any serious production path.
 
 5. Redis as a real service
 
-   DeepAI uses Redis for distributed locks, caching, sorted-set queues, and pub/sub. The `cache`, `queue`, `counter`, and `lock` primitives in `.deep` map well to these concepts. DeepApp can now run those primitives against a real Redis service when `--redis-url` or `REDIS_URL` is configured: cache values use Redis strings, queues use FIFO Redis lists, counters use atomic `INCRBY`, and locks use token-checked `SET NX EX` acquisition. Remaining Redis work includes sorted-set queues, pub/sub, TTLs from `.deep` declarations, and broader runtime wiring for every interpreted handler path.
+   DeepAI uses Redis for distributed locks, caching, sorted-set queues, and pub/sub. The `cache`, `queue`, `counter`, and `lock` primitives in `.deep` map well to these concepts. DeepApp can now emit `redis-catalog.json` from those declarations and run them against a real Redis service when `--redis-url` or `REDIS_URL` is configured: cache values use Redis strings with declared TTLs, queues use FIFO Redis lists or sorted sets based on `sorted_by`, counters use atomic `INCRBY`, and locks use token-checked `SET NX EX` acquisition. Remaining Redis work includes pub/sub execution and broader runtime wiring for every interpreted handler path.
 
 ### High-priority
 

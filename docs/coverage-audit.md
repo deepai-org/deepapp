@@ -15,7 +15,7 @@ Objective: implement DeepApp design v2 with a Docker-first workflow, TDD, and cl
 - Frontend asset compiler for page titles, component names, state declarations, and generated HTML.
 - CDN-aware frontend metadata for cache policy, API base URL, and client-side data-loading policy.
 - In-memory runtime engine for declared data tables, indexed lookups, uniqueness, cache values, queues, and counters.
-- Redis-backed runtime primitive layer for cache values, FIFO queues, atomic counters, and token-checked TTL locks when `REDIS_URL`/`--redis-url` is configured.
+- Redis-backed runtime primitive layer for cache values with declared TTLs, FIFO/sorted-set queues, atomic counters, and token-checked TTL locks when `REDIS_URL`/`--redis-url` is configured.
 - Durable store snapshot support for rows, primary-key counters, cache, queues, and counters.
 - Native handler slice that wires example endpoints into runtime cache, queue, and counter behavior.
 - Endpoint policy runtime for `identity` checks and anonymous `rate_limit` enforcement.
@@ -37,7 +37,7 @@ Objective: implement DeepApp design v2 with a Docker-first workflow, TDD, and cl
   - Runtime tests cover `/ping`, page rendering, endpoint routing, metadata routes, 404s, and method rejection.
   - Frontend tests verify page declarations become generated HTML served by the runtime, with CDN API base URL and client-fetch data-loading metadata.
   - Storage tests cover record creation/read, unique fields, indexed query enforcement, cache get/set, FIFO queues, counters, and lock acquire/release.
-  - Redis tests cover real Redis cache get/set, FIFO list queues, atomic counters, and `SET NX EX` lock contention/release when `REDIS_URL` is configured.
+  - Redis tests cover real Redis cache get/set, sorted-set queue ordering, atomic counters, and `SET NX EX` lock contention/release when `REDIS_URL` is configured.
   - Snapshot tests cover saving store state to JSON and restoring rows, cache entries, queue contents, and counters.
   - Handler tests cover research task creation/status and chat endpoint usage counters.
   - Endpoint policy tests cover anonymous rejection for `logged_in | api_key`, logged-in/API-key acceptance, anonymous IP rate limits, and declared-window rollover.
@@ -58,6 +58,7 @@ Objective: implement DeepApp design v2 with a Docker-first workflow, TDD, and cl
   - `build/task-catalog.json` records cron, daemon, and worker execution metadata.
   - `build/model-catalog.json` records model configs, providers, reasoning effort, and cost metadata.
   - `build/pricing-catalog.json` records category/model prices in cents.
+  - `build/redis-catalog.json` records Redis primitive backends, TTLs, and sorted queue order fields derived from `queue`, `cache`, `cached fn`, `counter`, and `topic` declarations.
 - Runtime coverage:
   - `deep run examples/chat.deep --addr 0.0.0.0:8080` serves compiled routes.
   - Docker smoke test verified `GET /ping`, `GET /__deep/static-report`, `GET /`, and `POST /hacking_is_a_serious_crime`.
@@ -81,8 +82,8 @@ Objective: implement DeepApp design v2 with a Docker-first workflow, TDD, and cl
   - `docker compose run --rm compiler build examples/chat.deep --out build`
   - `docker compose run --rm compiler migrate examples/chat.deep --preview`
   - `docker compose up -d runtime` plus HTTP smoke checks, followed by `docker compose down`
-  - `docker compose up -d runtime` with Redis-backed endpoint smoke checks and direct Redis key inspection, followed by `docker compose down`
+  - `docker compose up -d runtime` with Redis-backed endpoint smoke checks, direct Redis key inspection, sorted-set type check, and TTL checks, followed by `docker compose down`
 
 ## Current Limits
 
-This is a working compiler and runtime prototype, not a complete production implementation of every DeepApp v2 runtime promise. It does not yet interpret arbitrary DeepApp handler bodies beyond simple return objects plus native example handlers, emit machine code, provide an always-on durable storage service, render full reactive browser behavior from `view` blocks, execute real scheduled background loops, or call real providers such as Stripe/OpenAI/AWS. SQL and migration output are MySQL-oriented planning artifacts, not a live database backend, live migration runner, or complete optimizer. Streaming routes use SSE/chunked transfer, but their chunks are deterministic prototype payloads rather than provider-backed token streams. Frontend assets carry CDN/cache/API metadata, but there is not yet a real reactive browser data-loading runtime. Identity is represented by deterministic request classification from headers, not real user/session lookup. Redis can back cache values, FIFO queues, counters, and TTL locks, but sorted-set queues, pub/sub, declaration-derived TTLs, and full `with lock ...` handler interpretation remain incomplete. Rate limiting uses the configured counter backend, but without stale-bucket cleanup or a production policy engine. Pricing is represented as deterministic catalog lookup and usage counters, not a real billing ledger or payment integration. Those remain future implementation work beyond the compiler, HTTP runtime, SQL/migration planning artifacts, frontend asset, native example handlers, endpoint policy slice, simple handler interpreter, model/provider catalog, pricing slice, task-runner tick, in-memory storage/cache/queue, Redis primitive backend, and snapshot slice represented here.
+This is a working compiler and runtime prototype, not a complete production implementation of every DeepApp v2 runtime promise. It does not yet interpret arbitrary DeepApp handler bodies beyond simple return objects plus native example handlers, emit machine code, provide an always-on durable storage service, render full reactive browser behavior from `view` blocks, execute real scheduled background loops, or call real providers such as Stripe/OpenAI/AWS. SQL and migration output are MySQL-oriented planning artifacts, not a live database backend, live migration runner, or complete optimizer. Streaming routes use SSE/chunked transfer, but their chunks are deterministic prototype payloads rather than provider-backed token streams. Frontend assets carry CDN/cache/API metadata, but there is not yet a real reactive browser data-loading runtime. Identity is represented by deterministic request classification from headers, not real user/session lookup. Redis can back cache values with declared TTLs, FIFO/sorted-set queues, counters, and TTL locks, but pub/sub execution and full `with lock ...` handler interpretation remain incomplete. Rate limiting uses the configured counter backend, but without stale-bucket cleanup or a production policy engine. Pricing is represented as deterministic catalog lookup and usage counters, not a real billing ledger or payment integration. Those remain future implementation work beyond the compiler, HTTP runtime, SQL/migration planning artifacts, frontend asset, native example handlers, endpoint policy slice, simple handler interpreter, model/provider catalog, pricing slice, task-runner tick, in-memory storage/cache/queue, Redis primitive backend, and snapshot slice represented here.

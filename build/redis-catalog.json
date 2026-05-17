@@ -1,0 +1,37 @@
+[
+  {
+    "kind": "queue",
+    "name": "research_tasks",
+    "ttl_seconds": 3600,
+    "queue_order": "created_at",
+    "backend": "redis_sorted_set"
+  },
+  {
+    "kind": "cache",
+    "name": "user_session",
+    "ttl_seconds": 3600,
+    "queue_order": null,
+    "backend": "redis_string"
+  },
+  {
+    "kind": "cached_fn",
+    "name": "research_status",
+    "ttl_seconds": 3600,
+    "queue_order": null,
+    "backend": "redis_string"
+  },
+  {
+    "kind": "counter",
+    "name": "api_calls",
+    "ttl_seconds": null,
+    "queue_order": null,
+    "backend": "redis_counter"
+  },
+  {
+    "kind": "topic",
+    "name": "model_updates",
+    "ttl_seconds": null,
+    "queue_order": null,
+    "backend": "redis_pubsub"
+  }
+]

@@ -23,6 +23,7 @@ fn cli_builds_example_artifacts() {
     assert!(temp.join("task-catalog.json").exists());
     assert!(temp.join("model-catalog.json").exists());
     assert!(temp.join("pricing-catalog.json").exists());
+    assert!(temp.join("redis-catalog.json").exists());
 
     let manifest = fs::read_to_string(temp.join("manifest.json")).unwrap();
     assert!(manifest.contains("\"rollback\": \"automatic\""));
@@ -49,6 +50,10 @@ fn cli_builds_example_artifacts() {
     assert!(model_catalog.contains("\"name\": \"gpt-4.1-nano\""));
     let pricing_catalog = fs::read_to_string(temp.join("pricing-catalog.json")).unwrap();
     assert!(pricing_catalog.contains("\"category\": \"chat\""));
+    let redis_catalog = fs::read_to_string(temp.join("redis-catalog.json")).unwrap();
+    assert!(redis_catalog.contains("\"name\": \"research_tasks\""));
+    assert!(redis_catalog.contains("\"backend\": \"redis_sorted_set\""));
+    assert!(redis_catalog.contains("\"ttl_seconds\": 3600"));
 
     let _ = fs::remove_dir_all(temp);
 }
