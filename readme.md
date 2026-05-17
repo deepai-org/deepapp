@@ -168,3 +168,53 @@ Known gaps include:
 - External providers such as OpenAI, Stripe, AWS, and S3 are represented as metadata, not real calls.
 
 The goal of the repo is to keep tightening those gaps behind tests while preserving a Docker-first workflow.
+
+## Next Steps
+
+### Must-haves
+
+These are blocking for any serious production path.
+
+1. Real storage backend
+
+   The biggest gap. DeepAI has MySQL tables with hundreds of millions of rows where query patterns matter enormously: PK-range scans, no joins on huge tables, and `BETWEEN` over `IN`. In-memory storage with snapshots is not a path to production. DeepApp needs to emit real SQL against a real database, and the query planner needs to respect indexes declared in `data` blocks. The `@no_index` annotation on `ChatSession.created_at` is a good signal, but it needs to actually drive query generation.
+
+2. Real migrations on live data
+
+   `deep migrate --preview` is useful, but DeepAI runs migrations on tables with 300M+ rows where `ALTER TABLE` can lock the table for minutes. Production migration support needs:
+
+   - Migration ordering guarantees, including `migrate before deploy` from `deploy_rules`.
+   - Safe column-add semantics that avoid table rewrites.
+   - The ability to bail out and resume.
+
+3. Handler bodies that actually execute
+
+   The `handle` blocks are the application. Until `resolve_model(...).chat(request.messages)` actually calls OpenAI and `ChatMessage |> where(_.session == session)` actually queries the database, the language is still mostly a spec rather than a runtime.
+
+4. Real authentication and identity resolution
+
+   DeepAI's identity model is messy: `owner_id` vs `client_info_id`, anonymous-to-logged-in conversion, Django Allauth, and Google Auth. The `identity RequestIdentity` block captures the shape, but deterministic header classification is not enough. DeepApp needs session cookies, API key lookup against a real user table, and anonymous-to-owner dedup logic.
+
+5. Redis as a real service
+
+   DeepAI uses Redis for distributed locks, caching, sorted-set queues, and pub/sub. The `cache`, `queue`, `counter`, and `lock` primitives in `.deep` map well to these concepts, but they need a real Redis backend rather than in-memory maps.
+
+### High-priority
+
+These would block most useful application slices.
+
+6. Streaming responses
+
+   The chat endpoint declares `response: stream`. This needs real SSE or chunked transfer encoding, not a JSON blob.
+
+7. CDN-aware page serving
+
+   The `cdn` block and `cache private` page annotation are pointed in the right direction, but the critical constraint is stricter: never render user data in cached pages; load it client-side via the correct app/API base URL. That needs to be enforced in generated frontend behavior, not only declared.
+
+8. Worker/GPU integration
+
+   The `worker stable_diffusion` block is expressive, but it needs to actually talk to Vast/Salad APIs, manage Docker images, and read/write Redis queues in the format the existing `ai_integration` worker code expects.
+
+9. Distributed locks that work under concurrency
+
+   `with lock billing[user.id]` needs Redis `SETNX` with TTL, not in-process mutexes.
