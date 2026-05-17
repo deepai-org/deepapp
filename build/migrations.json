@@ -1,0 +1,22 @@
+[
+  {
+    "table": "ChatMessage",
+    "action": "create_or_reconcile"
+  },
+  {
+    "table": "ChatSession",
+    "action": "create_or_reconcile"
+  },
+  {
+    "table": "ChatStyle",
+    "action": "create_or_reconcile"
+  },
+  {
+    "table": "ClientInfo",
+    "action": "create_or_reconcile"
+  },
+  {
+    "table": "User",
+    "action": "create_or_reconcile"
+  }
+]

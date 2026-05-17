@@ -1,0 +1,17 @@
+[
+  {
+    "page": "chat",
+    "path": "/",
+    "title": "Chat",
+    "components": [
+      "ChatPage"
+    ],
+    "states": [
+      "input",
+      "messages",
+      "sessions",
+      "streaming"
+    ],
+    "html": "<!doctype html><html><head><title>Chat</title><meta name=\"deepapp-page\" content=\"chat\"></head><body><main data-route=\"/\" data-components=\"ChatPage\" data-states=\"input,messages,sessions,streaming\"><h1>Chat</h1></main></body></html>"
+  }
+]

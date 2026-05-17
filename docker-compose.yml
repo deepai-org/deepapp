@@ -1,0 +1,42 @@
+services:
+  compiler:
+    build:
+      context: .
+    image: deepapp/compiler:dev
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    entrypoint: ["deep"]
+
+  runtime:
+    build:
+      context: .
+    image: deepapp/compiler:dev
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    ports:
+      - "8080:8080"
+    command: ["run", "examples/chat.deep", "--addr", "0.0.0.0:8080", "--snapshot", "build/runtime-snapshot.json"]
+
+  test:
+    image: rust:1.95-slim
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - cargo-cache:/usr/local/cargo/registry
+      - target-cache:/workspace/target
+    command: ["cargo", "test", "--locked"]
+
+  fmt:
+    image: rust:1.95-slim
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - cargo-cache:/usr/local/cargo/registry
+      - target-cache:/workspace/target
+    command: ["sh", "-lc", "apt-get update && apt-get install -y --no-install-recommends rustfmt && rustfmt --check src/lib.rs src/main.rs tests/cli.rs"]
+
+volumes:
+  cargo-cache:
+  target-cache:

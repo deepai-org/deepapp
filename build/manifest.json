@@ -1,0 +1,87 @@
+{
+  "module": "chat",
+  "services": [
+    {
+      "name": "web",
+      "endpoints": [
+        "pages",
+        "static_assets"
+      ],
+      "min_instances": 2,
+      "max_instances": 10
+    },
+    {
+      "name": "chat",
+      "endpoints": [
+        "/hacking_is_a_serious_crime",
+        "/start_deep_research",
+        "/check_research_status/{task_id:uuid}"
+      ],
+      "min_instances": 2,
+      "max_instances": 8
+    }
+  ],
+  "routes": [
+    {
+      "path": "/",
+      "target": "services.web",
+      "cache": "Private",
+      "method": "GET",
+      "kind": "Page",
+      "identity": null,
+      "rate_limit": null,
+      "handler_response": null
+    },
+    {
+      "path": "/hacking_is_a_serious_crime",
+      "target": "services.chat",
+      "cache": "Private",
+      "method": "POST",
+      "kind": "Endpoint",
+      "identity": "any",
+      "rate_limit": {
+        "limit": 30,
+        "window": "min",
+        "key": "ip",
+        "condition": "anonymous"
+      },
+      "handler_response": null
+    },
+    {
+      "path": "/start_deep_research",
+      "target": "services.chat",
+      "cache": "Private",
+      "method": "POST",
+      "kind": "Endpoint",
+      "identity": "logged_in | api_key",
+      "rate_limit": null,
+      "handler_response": null
+    },
+    {
+      "path": "/check_research_status/{task_id:uuid}",
+      "target": "services.chat",
+      "cache": "Private",
+      "method": "GET",
+      "kind": "Endpoint",
+      "identity": "any",
+      "rate_limit": null,
+      "handler_response": {
+        "fields": {
+          "status": {
+            "String": "pending"
+          }
+        }
+      }
+    }
+  ],
+  "cdn": {
+    "domain": "deepai.org",
+    "api_domain": "api.deepai.org",
+    "bypass": [
+      "/dashboard*",
+      "/api/*"
+    ]
+  },
+  "health_check": "GET /ping expect 200",
+  "rollback": "automatic"
+}

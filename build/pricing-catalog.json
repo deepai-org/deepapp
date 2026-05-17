@@ -1,0 +1,22 @@
+[
+  {
+    "category": "chat",
+    "model": "default",
+    "cents": 1
+  },
+  {
+    "category": "chat",
+    "model": "gpt-5",
+    "cents": 3
+  },
+  {
+    "category": "image_generation",
+    "model": "default",
+    "cents": 5
+  },
+  {
+    "category": "image_generation",
+    "model": "stable-diffusion-xl",
+    "cents": 4
+  }
+]

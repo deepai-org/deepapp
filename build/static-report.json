@@ -1,0 +1,37 @@
+{
+  "data_types": 5,
+  "endpoints": 3,
+  "pages": 1,
+  "crons": 1,
+  "daemons": 1,
+  "language_units": {
+    "cache": 1,
+    "cached_fn": 1,
+    "counter": 1,
+    "function": 2,
+    "identity": 1,
+    "model_config": 1,
+    "pricing": 1,
+    "queue": 2,
+    "storage": 1,
+    "topic": 1,
+    "type": 4,
+    "worker": 1
+  },
+  "invariants": [
+    "invariant \"public pages never access user\"",
+    "invariant \"cron jobs have healthchecks\"",
+    "invariant \"billing paths use locks\""
+  ],
+  "checked_rules": [
+    "indexed queries",
+    "secret and pii log flows",
+    "public page data access",
+    "notification channels",
+    "cron and daemon operational contracts",
+    "service routing manifest",
+    "endpoint identity and rate limit policies",
+    "deploy rule ordering",
+    "v2 construct inventory"
+  ]
+}

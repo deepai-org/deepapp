@@ -1,0 +1,288 @@
+module chat
+
+type Email = string @pii format email
+type Url = string format url
+type ResearchStatus = pending | thinking | streaming | done | failed
+
+identity RequestIdentity =
+    api_key(key: UserApiKey, user: User)
+  | logged_in(user: User)
+  | anonymous(client: ClientInfo)
+
+model_config chat_models {
+  "gpt-5" {
+    providers: [openai.chat]
+    reasoning_effort: medium
+    cost: 3 credits
+  }
+
+  "gpt-4.1-nano" {
+    providers: [openai.chat]
+    cost: 1 credit
+  }
+}
+
+notification_channels {
+  errors: log when dev
+  user_activity: log when dev
+  notifications: log when dev
+}
+
+data User {
+  id: pk
+  email: Email unique @pii
+  username: string max 30 unique
+  password_hash: string @secret
+  locked: bool default false
+  created_at: datetime default now()
+
+  index email
+  index username
+}
+
+data ClientInfo {
+  id: pk
+  fingerprint: string unique
+  ip_address: string @pii
+
+  index fingerprint
+}
+
+data ChatStyle {
+  id: pk
+  name: string max 100
+  system_prompt: string
+  image_url: Url?
+  is_public: bool default true
+  creator: User?
+  popularity: int default 0
+
+  index popularity
+  index creator
+}
+
+data ChatSession {
+  id: pk
+  uuid: uuid unique default uuid()
+  owner: User?
+  client_info: ClientInfo?
+  style: ChatStyle?
+  title: string max 500 default ""
+  created_at: datetime default now() @no_index
+
+  index uuid
+  index owner
+  index client_info
+}
+
+data ChatMessage {
+  id: pk
+  session: ChatSession
+  role: "user" | "assistant"
+  content: string
+  thinking: string?
+  model: string
+  created_at: datetime default now()
+
+  index session
+}
+
+queue research_tasks: ResearchTask sorted_by created_at {
+  ttl: 1h
+}
+
+cache user_session[session_id: uuid] ttl 1h {
+  type: SessionData
+}
+
+cached fn research_status[task_id: uuid] -> ResearchStatus ttl 1h
+
+counter api_calls[ip: string, model: string] window 60s
+
+topic model_updates: ModelEvent
+
+pricing {
+  chat {
+    default: $0.01
+    "gpt-5": $0.03
+  }
+
+  image_generation {
+    default: $0.05
+    "stable-diffusion-xl": $0.04
+  }
+}
+
+storage images {
+  backend: s3
+  bucket: "deepai-images"
+  public_url: "https://images.deepai.org"
+}
+
+fn resolve_model(name: string) -> ChatModel {
+  chat_models[name] or chat_models["gpt-4.1-nano"]
+}
+
+fn charge_for_usage(user: User, category: string, model: string) {
+  with lock billing[user.id] {
+    notify notifications "usage charged"
+  }
+}
+
+worker stable_diffusion {
+  image: "sdxl-worker:latest"
+  providers: [vast, salad]
+
+  queue: sorted_by submitted_at capacity 5000
+
+  scale {
+    metric: queue.length / 10
+    min: 1
+    max: 20
+    cooldown: 2m
+  }
+
+  input {
+    prompt: string
+    width: int default 1024
+    height: int default 1024
+  }
+
+  output {
+    image_url: Url
+    seed: int
+  }
+
+  process(job) {
+    path = images.store(job.prompt, name: "{job.id}.webp")
+    { image_url: images.url(path), seed: 1 }
+  }
+}
+
+endpoint POST /hacking_is_a_serious_crime {
+  identity: any
+  rate_limit: 30/min by ip when anonymous
+
+  request {
+    messages: [{ role: string, content: string }]
+    model: string default "gpt-4.1"
+    style_id: int?
+    session_uuid: uuid?
+  }
+
+  response: stream {
+    content: string
+    thinking: string?
+    done: bool
+  }
+
+  handle {
+    user = User[email: "demo@deepai.org"]
+    session = ChatSession[uuid: request.session_uuid]
+    sessions = ChatSession |> where(_.owner == user)
+    messages = ChatMessage |> where(_.session == session)
+
+    notify user_activity "chat request accepted"
+
+    stream for chunk in resolve_model(request.model).chat(request.messages) {
+      yield { content: chunk.content, thinking: chunk.thinking, done: false }
+    }
+  }
+}
+
+endpoint POST /start_deep_research {
+  identity: logged_in | api_key
+  request { messages: [{ role: string, content: string }] session_uuid: uuid }
+  handle {
+    notify notifications "research queued"
+    { task_id: uuid() }
+  }
+}
+
+endpoint GET /check_research_status/{task_id:uuid} {
+  identity: any
+  handle {
+    { status: "pending" }
+  }
+}
+
+page chat at / cache private {
+  view {
+    component ChatPage {
+      state sessions: [ChatSession] = []
+      state messages: [ChatMessage] = []
+      state input: string = ""
+      state streaming: bool = false
+
+      on_load {
+        sessions = fetch GET /get_my_chat_sessions
+      }
+
+      view {
+        row {
+          sidebar { for session in sessions { session_item(session) } }
+          main { message_list { for msg in messages { chat_bubble(msg) } } }
+        }
+      }
+    }
+  }
+}
+
+cron daily_billing schedule "0 3 * * *" resources { cpu: 4096, mem: 8192 } {
+  healthcheck: "https://hc-ping.com/{secret HEALTHCHECK_BILLING}"
+
+  with lock daily_billing timeout 30m {
+    notify notifications "daily billing completed"
+  }
+
+  on error(e) {
+    notify errors "daily_billing failed"
+  }
+}
+
+daemon chat_task_checker schedule "*/5 * * * *" runtime 280s {
+  healthcheck: "https://hc-ping.com/{secret HEALTHCHECK_TASKS}"
+
+  with lock chat_task_checker {
+    loop {
+      sleep 5s
+    }
+  }
+
+  on error(e) {
+    notify errors "chat_task_checker failed"
+  }
+}
+
+services {
+  web {
+    endpoints: [pages, static_assets]
+    instances: 2..10
+  }
+
+  chat {
+    endpoints: [/hacking_is_a_serious_crime, /start_deep_research, /check_research_status/{task_id:uuid}]
+    instances: 2..8
+  }
+}
+
+cdn {
+  domain: "deepai.org"
+  origin: services.web
+
+  rules {
+    bypass: ["/dashboard*", "/api/*"]
+    api_domain: "api.deepai.org"
+  }
+}
+
+deploy_rules {
+  migration_before_deploy: true
+  cdn_refresh_on: [pages, static_assets]
+  health_check: GET /ping expect 200
+  rollback: automatic
+}
+
+invariant "public pages never access user"
+invariant "cron jobs have healthchecks"
+invariant "billing paths use locks"

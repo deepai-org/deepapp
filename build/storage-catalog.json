@@ -1,0 +1,296 @@
+[
+  {
+    "name": "ChatMessage",
+    "fields": {
+      "content": {
+        "name": "content",
+        "raw_type": "string",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "created_at": {
+        "name": "created_at",
+        "raw_type": "datetime",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "id": {
+        "name": "id",
+        "raw_type": "pk",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "model": {
+        "name": "model",
+        "raw_type": "string",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "role": {
+        "name": "role",
+        "raw_type": "\"user\"",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "session": {
+        "name": "session",
+        "raw_type": "ChatSession",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "thinking": {
+        "name": "thinking",
+        "raw_type": "string?",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      }
+    },
+    "indexes": [
+      "id",
+      "session"
+    ],
+    "unique_constraints": []
+  },
+  {
+    "name": "ChatSession",
+    "fields": {
+      "client_info": {
+        "name": "client_info",
+        "raw_type": "ClientInfo?",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "created_at": {
+        "name": "created_at",
+        "raw_type": "datetime",
+        "pii": false,
+        "secret": false,
+        "no_index": true,
+        "unique": false
+      },
+      "id": {
+        "name": "id",
+        "raw_type": "pk",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "owner": {
+        "name": "owner",
+        "raw_type": "User?",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "style": {
+        "name": "style",
+        "raw_type": "ChatStyle?",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "title": {
+        "name": "title",
+        "raw_type": "string",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "uuid": {
+        "name": "uuid",
+        "raw_type": "uuid",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": true
+      }
+    },
+    "indexes": [
+      "client_info",
+      "id",
+      "owner",
+      "uuid"
+    ],
+    "unique_constraints": []
+  },
+  {
+    "name": "ChatStyle",
+    "fields": {
+      "creator": {
+        "name": "creator",
+        "raw_type": "User?",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "id": {
+        "name": "id",
+        "raw_type": "pk",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "image_url": {
+        "name": "image_url",
+        "raw_type": "Url?",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "is_public": {
+        "name": "is_public",
+        "raw_type": "bool",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "name": {
+        "name": "name",
+        "raw_type": "string",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "popularity": {
+        "name": "popularity",
+        "raw_type": "int",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "system_prompt": {
+        "name": "system_prompt",
+        "raw_type": "string",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      }
+    },
+    "indexes": [
+      "creator",
+      "id",
+      "popularity"
+    ],
+    "unique_constraints": []
+  },
+  {
+    "name": "ClientInfo",
+    "fields": {
+      "fingerprint": {
+        "name": "fingerprint",
+        "raw_type": "string",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": true
+      },
+      "id": {
+        "name": "id",
+        "raw_type": "pk",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "ip_address": {
+        "name": "ip_address",
+        "raw_type": "string",
+        "pii": true,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      }
+    },
+    "indexes": [
+      "fingerprint",
+      "id"
+    ],
+    "unique_constraints": []
+  },
+  {
+    "name": "User",
+    "fields": {
+      "created_at": {
+        "name": "created_at",
+        "raw_type": "datetime",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "email": {
+        "name": "email",
+        "raw_type": "Email",
+        "pii": true,
+        "secret": false,
+        "no_index": false,
+        "unique": true
+      },
+      "id": {
+        "name": "id",
+        "raw_type": "pk",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "locked": {
+        "name": "locked",
+        "raw_type": "bool",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "password_hash": {
+        "name": "password_hash",
+        "raw_type": "string",
+        "pii": false,
+        "secret": true,
+        "no_index": false,
+        "unique": false
+      },
+      "username": {
+        "name": "username",
+        "raw_type": "string",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": true
+      }
+    },
+    "indexes": [
+      "email",
+      "id",
+      "username"
+    ],
+    "unique_constraints": []
+  }
+]

@@ -1,0 +1,29 @@
+[
+  {
+    "name": "daily_billing",
+    "kind": "Cron",
+    "schedule": "0 3 * * *",
+    "runtime": null,
+    "healthcheck": true,
+    "lock": true,
+    "on_error": true
+  },
+  {
+    "name": "chat_task_checker",
+    "kind": "Daemon",
+    "schedule": "*/5 * * * *",
+    "runtime": "280s",
+    "healthcheck": true,
+    "lock": true,
+    "on_error": true
+  },
+  {
+    "name": "stable_diffusion",
+    "kind": "Worker",
+    "schedule": null,
+    "runtime": null,
+    "healthcheck": false,
+    "lock": true,
+    "on_error": true
+  }
+]

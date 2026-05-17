@@ -1,0 +1,8 @@
+{
+  "contains_http_server": true,
+  "contains_storage_engine": true,
+  "contains_cache_queue_engine": true,
+  "contains_task_runner": true,
+  "contains_frontend_assets": true,
+  "contains_worker_support": true
+}
