@@ -28,6 +28,7 @@ pub struct Program {
     pub deploy_rules: Option<DeployRules>,
     pub sources: Vec<SourceFinding>,
     pub redis_primitives: Vec<RedisPrimitiveSpec>,
+    pub functions: Vec<FunctionDecl>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -70,6 +71,8 @@ pub struct EndpointDecl {
     pub identity: Option<String>,
     pub rate_limit: Option<RateLimitDecl>,
     pub response_stream: bool,
+    pub lock_name: Option<String>,
+    pub lock_ttl_seconds: Option<u64>,
     pub handler_response: Option<HandlerResponse>,
     pub body: String,
 }
@@ -152,6 +155,14 @@ pub struct DeployRules {
 pub struct SourceFinding {
     pub kind: String,
     pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FunctionDecl {
+    pub name: String,
+    pub lock_name: Option<String>,
+    pub lock_ttl_seconds: Option<u64>,
+    pub body: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -263,6 +274,8 @@ pub struct RoutePlan {
     pub identity: Option<String>,
     pub rate_limit: Option<RateLimitDecl>,
     pub response_stream: bool,
+    pub lock_name: Option<String>,
+    pub lock_ttl_seconds: Option<u64>,
     pub handler_response: Option<HandlerResponse>,
 }
 
@@ -634,6 +647,7 @@ pub fn parse(source: &str) -> Result<Program, DeepError> {
         deploy_rules: None,
         sources: Vec::new(),
         redis_primitives: Vec::new(),
+        functions: Vec::new(),
     };
 
     let lines: Vec<&str> = source.lines().collect();
@@ -801,6 +815,19 @@ pub fn parse(source: &str) -> Result<Program, DeepError> {
             });
             program.redis_primitives.push(decl);
             i += 1;
+        } else if line.starts_with("fn ") {
+            let (header, body, next) = capture_block(&lines, i)?;
+            let decl = parse_function(&header, &body);
+            program.sources.push(SourceFinding {
+                kind: "function".into(),
+                name: decl.name.clone(),
+            });
+            program.declarations.push(LanguageDecl {
+                kind: "function".into(),
+                name: decl.name.clone(),
+            });
+            program.functions.push(decl);
+            i = next;
         } else if line.starts_with("invariant ") {
             program.invariants.push(line);
             i += 1;
@@ -962,9 +989,26 @@ fn parse_endpoint(header: &str, body: &str, line: usize) -> Result<EndpointDecl,
         identity,
         rate_limit: parse_rate_limit(body),
         response_stream: body.contains("response: stream") || body.contains("response: stream "),
+        lock_name: parse_lock_name(body),
+        lock_ttl_seconds: parse_lock_ttl_seconds(body),
         handler_response: parse_handler_response(body),
         body: body.to_string(),
     })
+}
+
+fn parse_function(header: &str, body: &str) -> FunctionDecl {
+    let name = header
+        .split_whitespace()
+        .nth(1)
+        .and_then(|name| name.split_once('(').map(|(name, _)| name).or(Some(name)))
+        .unwrap_or("unknown")
+        .to_string();
+    FunctionDecl {
+        name,
+        lock_name: parse_lock_name(body),
+        lock_ttl_seconds: parse_lock_ttl_seconds(body),
+        body: body.to_string(),
+    }
 }
 
 fn parse_rate_limit(body: &str) -> Option<RateLimitDecl> {
@@ -1055,7 +1099,7 @@ fn parse_daemon(header: &str, body: &str) -> DaemonDecl {
 }
 
 fn parse_lock_name(body: &str) -> Option<String> {
-    Regex::new(r"with\s+lock\s+([A-Za-z][A-Za-z0-9_\-.]*)")
+    Regex::new(r"with\s+lock\s+([A-Za-z][A-Za-z0-9_\-.\[\]]*)")
         .unwrap()
         .captures(body)
         .and_then(|caps| caps.get(1))
@@ -1728,18 +1772,31 @@ pub fn generate(program: &Program) -> BuildArtifacts {
             identity: None,
             rate_limit: None,
             response_stream: false,
+            lock_name: None,
+            lock_ttl_seconds: None,
             handler_response: None,
         })
-        .chain(program.endpoints.iter().map(|endpoint| RoutePlan {
-            path: endpoint.path.clone(),
-            target: route_target(&services, &endpoint.path),
-            cache: CacheMode::Private,
-            method: Some(endpoint.method.clone()),
-            kind: RouteKind::Endpoint,
-            identity: endpoint.identity.clone(),
-            rate_limit: endpoint.rate_limit.clone(),
-            response_stream: endpoint.response_stream,
-            handler_response: endpoint.handler_response.clone(),
+        .chain(program.endpoints.iter().map(|endpoint| {
+            let function_lock = endpoint_function_lock(endpoint, &program.functions);
+            RoutePlan {
+                path: endpoint.path.clone(),
+                target: route_target(&services, &endpoint.path),
+                cache: CacheMode::Private,
+                method: Some(endpoint.method.clone()),
+                kind: RouteKind::Endpoint,
+                identity: endpoint.identity.clone(),
+                rate_limit: endpoint.rate_limit.clone(),
+                response_stream: endpoint.response_stream,
+                lock_name: endpoint.lock_name.clone().or_else(|| {
+                    function_lock
+                        .as_ref()
+                        .and_then(|function| function.lock_name.clone())
+                }),
+                lock_ttl_seconds: endpoint
+                    .lock_ttl_seconds
+                    .or_else(|| function_lock.and_then(|function| function.lock_ttl_seconds)),
+                handler_response: endpoint.handler_response.clone(),
+            }
         }))
         .collect();
     let sql_plan = compile_sql_plan(program);
@@ -1835,6 +1892,15 @@ fn compile_task_catalog(program: &Program) -> Vec<TaskSpec> {
             }),
     );
     tasks
+}
+
+fn endpoint_function_lock<'a>(
+    endpoint: &EndpointDecl,
+    functions: &'a [FunctionDecl],
+) -> Option<&'a FunctionDecl> {
+    functions.iter().find(|function| {
+        function.lock_name.is_some() && endpoint.body.contains(&format!("{}(", function.name))
+    })
 }
 
 fn compile_frontend_assets(pages: &[PageDecl], cdn: Option<&CdnDecl>) -> Vec<FrontendAsset> {
@@ -2751,6 +2817,26 @@ fn endpoint_response(
     models: &[ModelSpec],
     pricing: &[PricingRule],
 ) -> RuntimeResponse {
+    let lock_token = format!("endpoint:{}:{}", route.path, current_epoch_seconds());
+    if let Some(lock_name) = route.lock_name.as_deref() {
+        let ttl_seconds = route.lock_ttl_seconds.unwrap_or(300);
+        if !store.lock_acquire(lock_name, &lock_token, ttl_seconds) {
+            return json_error(423, &format!("endpoint lock {lock_name} is held"));
+        }
+        let response = endpoint_response_unlocked(route, path, store, models, pricing);
+        store.lock_release(lock_name, &lock_token);
+        return response;
+    }
+    endpoint_response_unlocked(route, path, store, models, pricing)
+}
+
+fn endpoint_response_unlocked(
+    route: &RoutePlan,
+    path: &str,
+    store: &MemoryStore,
+    models: &[ModelSpec],
+    pricing: &[PricingRule],
+) -> RuntimeResponse {
     if route.path == "/start_deep_research" {
         let next = store.counter_add("research_tasks:sequence", 1);
         let task_id = format!("research-{next}");
@@ -3044,6 +3130,9 @@ pricing {
 storage images { backend: s3 bucket: "deepai-images" }
 worker stable_diffusion { image: "sdxl-worker:latest" }
 fn resolve_model(name: string) -> ChatModel { chat_models[name] }
+fn charge_for_usage(user: User, category: string, model: string) {
+  with lock billing[user.id] { notify notifications "usage charged" }
+}
 
 endpoint POST /hacking_is_a_serious_crime {
   identity: any
@@ -3053,6 +3142,7 @@ endpoint POST /hacking_is_a_serious_crime {
   handle {
     user = User[email: "foo@bar.com"]
     by_owner = ChatSession |> where(_.owner == user)
+    charge_for_usage(user, "chat", "gpt-4.1")
     notify errors "request accepted"
   }
 }
@@ -3139,6 +3229,10 @@ invariant "cron jobs have healthchecks"
             Some(30)
         );
         assert_eq!(artifacts.manifest.routes[1].response_stream, true);
+        assert_eq!(
+            artifacts.manifest.routes[1].lock_name.as_deref(),
+            Some("billing[user.id]")
+        );
         assert_eq!(artifacts.report.language_units["queue"], 1);
         assert_eq!(artifacts.report.language_units["worker"], 1);
         assert_eq!(artifacts.report.language_units["model_config"], 1);
@@ -3716,6 +3810,30 @@ invariant "cron jobs have healthchecks"
             runtime.store().counter_get("usage:chat:gpt-4.1-nano:cents"),
             1
         );
+    }
+
+    #[test]
+    fn runtime_endpoint_uses_called_function_lock() {
+        let artifacts = compile_source(valid_program()).unwrap();
+        let runtime = RuntimeApp::new(artifacts);
+        assert!(runtime
+            .store()
+            .lock_acquire("billing[user.id]", "external-billing", 60));
+
+        let response = runtime.handle("POST", "/hacking_is_a_serious_crime");
+        assert_eq!(response.status, 423);
+        assert!(response
+            .body
+            .contains("endpoint lock billing[user.id] is held"));
+        assert_eq!(
+            runtime
+                .store()
+                .counter_get("endpoint:/hacking_is_a_serious_crime"),
+            0
+        );
+        assert!(runtime
+            .store()
+            .lock_release("billing[user.id]", "external-billing"));
     }
 
     #[test]

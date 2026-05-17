@@ -177,7 +177,7 @@ Known gaps include:
 - Rate limiting uses the configured counter backend, but it still lacks stale-bucket cleanup and a production policy engine.
 - Pricing is catalog lookup plus counters, not a billing ledger or payment integration.
 - Storage is in-memory with snapshot support. The compiler emits a MySQL-oriented SQL plan, but it does not yet execute against an always-on durable database service.
-- Redis can back cache, FIFO queue, sorted-set queue, counter, and TTL lock primitives when configured. Cron, daemon, and worker task ticks now acquire declared locks before running. Pub/sub and full endpoint handler-level lock interpretation are not implemented yet.
+- Redis can back cache, FIFO queue, sorted-set queue, counter, and TTL lock primitives when configured. Cron, daemon, worker task ticks, and endpoint routes that call locked functions now acquire declared locks before running. Pub/sub execution is not implemented yet.
 - Frontend output is CDN-aware generated HTML metadata, not a reactive browser runtime.
 - Cron, daemon, and worker behavior runs through deterministic ticks, not real schedulers.
 - External providers such as OpenAI, Stripe, AWS, and S3 are represented as metadata, not real calls.
@@ -214,7 +214,7 @@ These are blocking for any serious production path.
 
 5. Redis as a real service
 
-   DeepAI uses Redis for distributed locks, caching, sorted-set queues, and pub/sub. The `cache`, `queue`, `counter`, and `lock` primitives in `.deep` map well to these concepts. DeepApp can now emit `redis-catalog.json` from those declarations and run them against a real Redis service when `--redis-url` or `REDIS_URL` is configured: cache values use Redis strings with declared TTLs, queues use FIFO Redis lists or sorted sets based on `sorted_by`, counters use atomic `INCRBY`, and locks use token-checked `SET NX EX` acquisition. Cron, daemon, and worker task ticks now acquire declared locks before running. Remaining Redis work includes pub/sub execution and broader lock wiring for endpoint handler paths.
+   DeepAI uses Redis for distributed locks, caching, sorted-set queues, and pub/sub. The `cache`, `queue`, `counter`, and `lock` primitives in `.deep` map well to these concepts. DeepApp can now emit `redis-catalog.json` from those declarations and run them against a real Redis service when `--redis-url` or `REDIS_URL` is configured: cache values use Redis strings with declared TTLs, queues use FIFO Redis lists or sorted sets based on `sorted_by`, counters use atomic `INCRBY`, and locks use token-checked `SET NX EX` acquisition. Cron, daemon, worker task ticks, and endpoint routes that call locked functions now acquire declared locks before running. Remaining Redis work includes pub/sub execution.
 
 ### High-priority
 
@@ -234,4 +234,4 @@ These would block most useful application slices.
 
 9. Distributed locks that work under concurrency
 
-   `with lock billing[user.id]` needs Redis `SETNX` with TTL, not in-process mutexes. DeepApp now has a Redis-backed lock primitive that uses atomic `SET NX EX` acquisition and token-checked release, and task ticks use parsed cron/daemon/worker lock metadata before executing. Remaining work is interpreting arbitrary endpoint handler `with lock ...` blocks through that primitive.
+   `with lock billing[user.id]` needs Redis `SETNX` with TTL, not in-process mutexes. DeepApp now has a Redis-backed lock primitive that uses atomic `SET NX EX` acquisition and token-checked release. Task ticks use parsed cron/daemon/worker lock metadata before executing, and endpoint routes inherit locks from called functions such as `charge_for_usage`.

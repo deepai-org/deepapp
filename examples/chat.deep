@@ -181,6 +181,7 @@ endpoint POST /hacking_is_a_serious_crime {
     session = ChatSession[uuid: request.session_uuid]
     sessions = ChatSession |> where(_.owner == user)
     messages = ChatMessage |> where(_.session == session)
+    charge_for_usage(user, "chat", request.model)
 
     notify user_activity "chat request accepted"
 

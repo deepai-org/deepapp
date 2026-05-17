@@ -31,6 +31,8 @@
       "identity": null,
       "rate_limit": null,
       "response_stream": false,
+      "lock_name": null,
+      "lock_ttl_seconds": null,
       "handler_response": null
     },
     {
@@ -47,6 +49,8 @@
         "condition": "anonymous"
       },
       "response_stream": true,
+      "lock_name": "billing[user.id]",
+      "lock_ttl_seconds": null,
       "handler_response": null
     },
     {
@@ -58,6 +62,8 @@
       "identity": "logged_in | api_key",
       "rate_limit": null,
       "response_stream": false,
+      "lock_name": null,
+      "lock_ttl_seconds": null,
       "handler_response": null
     },
     {
@@ -69,6 +75,8 @@
       "identity": "any",
       "rate_limit": null,
       "response_stream": false,
+      "lock_name": null,
+      "lock_ttl_seconds": null,
       "handler_response": {
         "fields": {
           "status": {

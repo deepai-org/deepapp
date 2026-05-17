@@ -31,6 +31,7 @@ fn cli_builds_example_artifacts() {
     assert!(manifest.contains("\"rate_limit\""));
     assert!(manifest.contains("\"limit\": 30"));
     assert!(manifest.contains("\"response_stream\": true"));
+    assert!(manifest.contains("\"lock_name\": \"billing[user.id]\""));
     let migrations = fs::read_to_string(temp.join("migrations.json")).unwrap();
     assert!(migrations.contains("\"phase\": \"pre_deploy\""));
     assert!(migrations.contains("\"resumable\": true"));
