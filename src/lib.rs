@@ -246,6 +246,7 @@ pub struct RoutePlan {
     pub kind: RouteKind,
     pub identity: Option<String>,
     pub rate_limit: Option<RateLimitDecl>,
+    pub response_stream: bool,
     pub handler_response: Option<HandlerResponse>,
 }
 
@@ -331,6 +332,7 @@ pub struct RuntimeResponse {
     pub status: u16,
     pub content_type: String,
     pub body: String,
+    pub chunked: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -1399,6 +1401,7 @@ pub fn generate(program: &Program) -> BuildArtifacts {
             kind: RouteKind::Page,
             identity: None,
             rate_limit: None,
+            response_stream: false,
             handler_response: None,
         })
         .chain(program.endpoints.iter().map(|endpoint| RoutePlan {
@@ -1409,6 +1412,7 @@ pub fn generate(program: &Program) -> BuildArtifacts {
             kind: RouteKind::Endpoint,
             identity: endpoint.identity.clone(),
             rate_limit: endpoint.rate_limit.clone(),
+            response_stream: endpoint.response_stream,
             handler_response: endpoint.handler_response.clone(),
         }))
         .collect();
@@ -2109,6 +2113,7 @@ fn page_response(route: &RoutePlan, assets: &[FrontendAsset]) -> RuntimeResponse
             status: 200,
             content_type: "text/html; charset=utf-8".into(),
             body: asset.html.clone(),
+            chunked: false,
         };
     }
     RuntimeResponse {
@@ -2120,6 +2125,7 @@ fn page_response(route: &RoutePlan, assets: &[FrontendAsset]) -> RuntimeResponse
             html_escape(&route.target),
             html_escape(&route.path)
         ),
+        chunked: false,
     }
 }
 
@@ -2242,6 +2248,7 @@ fn endpoint_response(
                 "task_id": task_id
             })
             .to_string(),
+            chunked: false,
         };
     }
 
@@ -2260,6 +2267,7 @@ fn endpoint_response(
                     "status": status
                 })
                 .to_string(),
+                chunked: false,
             };
         }
     }
@@ -2268,21 +2276,35 @@ fn endpoint_response(
         store.counter_add("endpoint:/hacking_is_a_serious_crime", 1);
         let resolution = resolve_model_from_catalog("gpt-4.1", models, &BTreeSet::new());
         let charge = charge_for_usage(store, pricing, "chat", &resolution.selected_model);
-        return RuntimeResponse {
-            status: 200,
-            content_type: "application/json".into(),
-            body: serde_json::json!({
-                "ok": true,
-                "route": route.path,
-                "target": route.target,
-                "kind": "endpoint",
-                "model": resolution.selected_model,
-                "provider": resolution.selected_provider,
-                "fallback_used": resolution.fallback_used,
-                "charge_cents": charge.cents,
-                "usage_count": charge.usage_count
-            })
-            .to_string(),
+        let payload = serde_json::json!({
+            "ok": true,
+            "route": route.path,
+            "target": route.target,
+            "kind": "endpoint",
+            "model": resolution.selected_model,
+            "provider": resolution.selected_provider,
+            "fallback_used": resolution.fallback_used,
+            "charge_cents": charge.cents,
+            "usage_count": charge.usage_count
+        });
+        return if route.response_stream {
+            sse_response(vec![
+                ("message", payload),
+                (
+                    "done",
+                    serde_json::json!({
+                        "ok": true,
+                        "done": true
+                    }),
+                ),
+            ])
+        } else {
+            RuntimeResponse {
+                status: 200,
+                content_type: "application/json".into(),
+                body: payload.to_string(),
+                chunked: false,
+            }
         };
     }
 
@@ -2292,6 +2314,7 @@ fn endpoint_response(
             content_type: "application/json".into(),
             body: evaluate_handler_response(handler_response, &route_params(&route.path, path))
                 .to_string(),
+            chunked: false,
         };
     }
 
@@ -2305,6 +2328,7 @@ fn endpoint_response(
             "kind": "endpoint"
         })
         .to_string(),
+        chunked: false,
     }
 }
 
@@ -2369,11 +2393,25 @@ fn header_value<'a>(request: &'a str, name: &str) -> Option<&'a str> {
     })
 }
 
+fn sse_response(events: Vec<(&str, serde_json::Value)>) -> RuntimeResponse {
+    let body = events
+        .into_iter()
+        .map(|(event, data)| format!("event: {event}\ndata: {data}\n\n"))
+        .collect::<String>();
+    RuntimeResponse {
+        status: 200,
+        content_type: "text/event-stream; charset=utf-8".into(),
+        body,
+        chunked: true,
+    }
+}
+
 fn text_response(status: u16, body: impl Into<String>) -> RuntimeResponse {
     RuntimeResponse {
         status,
         content_type: "text/plain; charset=utf-8".into(),
         body: body.into(),
+        chunked: false,
     }
 }
 
@@ -2382,6 +2420,7 @@ fn json_response(status: u16, value: &impl Serialize) -> RuntimeResponse {
         status,
         content_type: "application/json".into(),
         body: serde_json::to_string(value).unwrap_or_else(|_| "{}".into()),
+        chunked: false,
     }
 }
 
@@ -2390,6 +2429,7 @@ fn json_error(status: u16, message: &str) -> RuntimeResponse {
         status,
         content_type: "application/json".into(),
         body: serde_json::json!({ "ok": false, "error": message }).to_string(),
+        chunked: false,
     }
 }
 
@@ -2400,6 +2440,18 @@ fn write_http_response(stream: &mut TcpStream, response: RuntimeResponse) -> any
         405 => "Method Not Allowed",
         _ => "Error",
     };
+    if response.chunked {
+        write!(
+            stream,
+            "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nTransfer-Encoding: chunked\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",
+            response.status, reason, response.content_type
+        )?;
+        for chunk in response.body.split_inclusive("\n\n") {
+            write!(stream, "{:X}\r\n{}\r\n", chunk.len(), chunk)?;
+        }
+        write!(stream, "0\r\n\r\n")?;
+        return Ok(());
+    }
     write!(
         stream,
         "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -2561,6 +2613,7 @@ invariant "cron jobs have healthchecks"
                 .map(|limit| limit.limit),
             Some(30)
         );
+        assert_eq!(artifacts.manifest.routes[1].response_stream, true);
         assert_eq!(artifacts.report.language_units["queue"], 1);
         assert_eq!(artifacts.report.language_units["worker"], 1);
         assert_eq!(artifacts.report.language_units["model_config"], 1);
@@ -2728,6 +2781,10 @@ invariant "cron jobs have healthchecks"
 
         let endpoint = runtime.handle("POST", "/hacking_is_a_serious_crime");
         assert_eq!(endpoint.status, 200);
+        assert_eq!(endpoint.content_type, "text/event-stream; charset=utf-8");
+        assert!(endpoint.chunked);
+        assert!(endpoint.body.contains("event: message"));
+        assert!(endpoint.body.contains("event: done"));
         assert!(endpoint.body.contains("\"kind\":\"endpoint\""));
 
         let report = runtime.handle("GET", "/__deep/static-report");
@@ -3033,6 +3090,7 @@ invariant "cron jobs have healthchecks"
 
         let response = runtime.handle("POST", "/hacking_is_a_serious_crime");
         assert_eq!(response.status, 200);
+        assert!(response.chunked);
         assert!(response.body.contains("\"model\":\"gpt-4.1-nano\""));
         assert!(response.body.contains("\"charge_cents\":1"));
         assert_eq!(

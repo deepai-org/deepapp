@@ -135,10 +135,10 @@ curl -fsS http://127.0.0.1:8080/__deep/price/chat/gpt-5
 Call the public chat endpoint:
 
 ```sh
-curl -fsS -X POST http://127.0.0.1:8080/hacking_is_a_serious_crime
+curl -i -N -X POST http://127.0.0.1:8080/hacking_is_a_serious_crime
 ```
 
-The prototype response includes route metadata, selected model/provider metadata, and usage charge information.
+The prototype response is served as `text/event-stream` with HTTP chunked transfer. Its `data:` payload includes route metadata, selected model/provider metadata, and usage charge information.
 
 Call the research endpoint without credentials:
 

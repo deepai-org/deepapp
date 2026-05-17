@@ -10,6 +10,7 @@ This repository currently contains a Rust implementation of a compiler frontend,
 - Run static checks for indexed queries, private page access, secret/PII flows, notification channels, cron/daemon contracts, deploy rules, endpoint identity, and rate limits.
 - Generate JSON artifacts for routes, services, SQL planning, storage, migrations, frontend assets, background tasks, models, and pricing.
 - Run a local HTTP runtime for compiled pages and endpoints.
+- Serve `response: stream` endpoints as Server-Sent Events over HTTP chunked transfer.
 - Serve runtime metadata through `/__deep/*` routes.
 - Exercise in-memory storage, cache, queues, counters, snapshots, model fallback, pricing, rate limiting, and deterministic task ticks.
 
@@ -160,6 +161,7 @@ This is a working compiler/runtime prototype, not a complete production implemen
 Known gaps include:
 
 - Arbitrary handler bodies are not fully interpreted.
+- Streaming uses SSE/chunked transfer for compiled stream routes, but provider-backed token streaming is still deterministic prototype data.
 - Authentication is deterministic header classification, not real user/session lookup.
 - Rate limiting uses in-memory wall-clock buckets, not a distributed limiter.
 - Pricing is catalog lookup plus counters, not a billing ledger or payment integration.
@@ -208,7 +210,7 @@ These would block most useful application slices.
 
 6. Streaming responses
 
-   The chat endpoint declares `response: stream`. This needs real SSE or chunked transfer encoding, not a JSON blob.
+   The chat endpoint declares `response: stream`. The runtime now serves compiled stream endpoints as Server-Sent Events over HTTP chunked transfer. The remaining production work is connecting those chunks to real provider streams and handler execution rather than deterministic prototype payloads.
 
 7. CDN-aware page serving
 
