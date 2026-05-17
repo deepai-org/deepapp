@@ -9,6 +9,7 @@ Objective: implement DeepApp design v2 with a Docker-first workflow, TDD, and cl
 - Static analyzer for the core design rules that are currently enforceable from source text.
 - Build artifact generator for deployment manifest, static report, runtime bundle description, and migration plan.
 - MySQL-oriented SQL planning artifact for declared tables, indexes, and indexed `where(...)` query patterns.
+- Ordered online migration planning metadata with DDL, pre-deploy phase, lock-risk notes, resumability, and checkpoint keys.
 - Executable runtime slice for compiled pages/endpoints, health checks, and compiler metadata routes.
 - Frontend asset compiler for page titles, component names, state declarations, and generated HTML.
 - In-memory runtime engine for declared data tables, indexed lookups, uniqueness, cache values, queues, and counters.
@@ -39,12 +40,14 @@ Objective: implement DeepApp design v2 with a Docker-first workflow, TDD, and cl
   - Handler interpreter tests cover parsing and evaluating simple endpoint return objects.
   - Model tests cover model catalog parsing, default model fallback, and provider failover.
   - Pricing tests cover catalog parsing, default model fallback, chat endpoint charge metadata, and usage cent counters.
+  - Migration tests cover pre-deploy ordering, online/resumable metadata, checkpoint keys, and generated DDL presence.
   - Task-runner tests cover cron/daemon ticks, worker job processing, task counters, task events, and worker result queues.
   - `tests/cli.rs` verifies the CLI writes all expected build artifacts.
 - Language design coverage:
   - `examples/chat.deep` includes module, types, identity, model config, notification channels, data, queue, cache, cached function, counter, topic, pricing, storage, functions, worker, endpoints, page, cron, daemon, services, CDN, deploy rules, and invariants.
   - `build/static-report.json` records counts for parsed language units.
   - `build/manifest.json` records services, routes, route kind/method, endpoint identity/rate-limit policies, CDN, health check, and rollback policy.
+  - `build/migrations.json` records ordered pre-deploy migration steps with DDL, online/resumable flags, lock-risk notes, and checkpoint keys.
   - `build/sql-plan.json` records MySQL table DDL, index DDL, and indexed query plans derived from `data` declarations and handler query expressions.
   - `build/frontend-assets.json` records page assets generated from `view` blocks.
   - `build/storage-catalog.json` records data schemas, fields, indexes, and privacy/security flags used by the runtime store.
@@ -74,4 +77,4 @@ Objective: implement DeepApp design v2 with a Docker-first workflow, TDD, and cl
 
 ## Current Limits
 
-This is a working compiler and runtime prototype, not a complete production implementation of every DeepApp v2 runtime promise. It does not yet interpret arbitrary DeepApp handler bodies beyond simple return objects plus native example handlers, emit machine code, provide an always-on durable storage service, render full reactive browser behavior from `view` blocks, execute real scheduled background loops, or call real providers such as Stripe/OpenAI/AWS. SQL output is a MySQL-oriented planning artifact, not a live database backend or complete optimizer. Identity is represented by deterministic request classification from headers, not real user/session lookup. Rate limiting is represented by in-memory counters with wall-clock buckets, but without distributed coordination or stale-bucket cleanup. Pricing is represented as deterministic catalog lookup and in-memory usage counters, not a real billing ledger or payment integration. Those remain future implementation work beyond the compiler, HTTP runtime, SQL planning artifact, frontend asset, native example handlers, endpoint policy slice, simple handler interpreter, model/provider catalog, pricing slice, task-runner tick, in-memory storage/cache/queue, and snapshot slice represented here.
+This is a working compiler and runtime prototype, not a complete production implementation of every DeepApp v2 runtime promise. It does not yet interpret arbitrary DeepApp handler bodies beyond simple return objects plus native example handlers, emit machine code, provide an always-on durable storage service, render full reactive browser behavior from `view` blocks, execute real scheduled background loops, or call real providers such as Stripe/OpenAI/AWS. SQL and migration output are MySQL-oriented planning artifacts, not a live database backend, live migration runner, or complete optimizer. Identity is represented by deterministic request classification from headers, not real user/session lookup. Rate limiting is represented by in-memory counters with wall-clock buckets, but without distributed coordination or stale-bucket cleanup. Pricing is represented as deterministic catalog lookup and in-memory usage counters, not a real billing ledger or payment integration. Those remain future implementation work beyond the compiler, HTTP runtime, SQL/migration planning artifacts, frontend asset, native example handlers, endpoint policy slice, simple handler interpreter, model/provider catalog, pricing slice, task-runner tick, in-memory storage/cache/queue, and snapshot slice represented here.

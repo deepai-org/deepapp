@@ -78,7 +78,7 @@ Running `deep build` writes these files into `build/`:
 - `manifest.json`: services, routes, endpoint identity/rate-limit policy, CDN, health check, rollback.
 - `static-report.json`: language unit counts, invariants, checked rules.
 - `runtime-bundle.json`: runtime capability summary.
-- `migrations.json`: storage reconciliation plan.
+- `migrations.json`: ordered pre-deploy migration plan with online/resumable metadata, DDL, lock-risk notes, and checkpoint keys.
 - `sql-plan.json`: MySQL-oriented table DDL, index DDL, and indexed query plans.
 - `storage-catalog.json`: data schemas, fields, indexes, uniqueness, privacy/security flags.
 - `frontend-assets.json`: generated page assets.
@@ -184,7 +184,7 @@ These are blocking for any serious production path.
 
 2. Real migrations on live data
 
-   `deep migrate --preview` is useful, but DeepAI runs migrations on tables with 300M+ rows where `ALTER TABLE` can lock the table for minutes. Production migration support needs:
+   `deep migrate --preview` is useful, but DeepAI runs migrations on tables with 300M+ rows where `ALTER TABLE` can lock the table for minutes. DeepApp now emits ordered pre-deploy migration steps with online/resumable metadata, DDL, lock-risk notes, and checkpoint keys. Production migration support still needs actual execution against live MySQL plus:
 
    - Migration ordering guarantees, including `migrate before deploy` from `deploy_rules`.
    - Safe column-add semantics that avoid table rewrites.

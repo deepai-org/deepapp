@@ -281,6 +281,13 @@ pub struct RuntimeBundle {
 pub struct MigrationStep {
     pub table: String,
     pub action: String,
+    pub order: u32,
+    pub phase: String,
+    pub online: bool,
+    pub resumable: bool,
+    pub lock_risk: String,
+    pub ddl: Vec<String>,
+    pub checkpoint_key: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1112,6 +1119,29 @@ fn compile_sql_plan(program: &Program) -> SqlPlan {
     }
 }
 
+fn compile_migrations(sql_plan: &SqlPlan) -> Vec<MigrationStep> {
+    sql_plan
+        .tables
+        .iter()
+        .enumerate()
+        .map(|(idx, table)| {
+            let mut ddl = vec![table.create_table.clone()];
+            ddl.extend(table.indexes.iter().cloned());
+            MigrationStep {
+                table: table.table.clone(),
+                action: "create_or_reconcile".into(),
+                order: (idx + 1) as u32,
+                phase: "pre_deploy".into(),
+                online: true,
+                resumable: true,
+                lock_risk: "metadata_lock_only_for_new_table_or_online_additive_changes".into(),
+                ddl,
+                checkpoint_key: format!("migration:{}:create_or_reconcile", table.table),
+            }
+        })
+        .collect()
+}
+
 fn compile_sql_table(data: &DataDecl) -> SqlTablePlan {
     let mut columns = Vec::new();
     for field in data.fields.values() {
@@ -1382,6 +1412,8 @@ pub fn generate(program: &Program) -> BuildArtifacts {
             handler_response: endpoint.handler_response.clone(),
         }))
         .collect();
+    let sql_plan = compile_sql_plan(program);
+    let migrations = compile_migrations(&sql_plan);
 
     BuildArtifacts {
         manifest: DeployManifest {
@@ -1420,15 +1452,8 @@ pub fn generate(program: &Program) -> BuildArtifacts {
             contains_frontend_assets: !program.pages.is_empty(),
             contains_worker_support: true,
         },
-        migrations: program
-            .data
-            .keys()
-            .map(|table| MigrationStep {
-                table: table.clone(),
-                action: "create_or_reconcile".into(),
-            })
-            .collect(),
-        sql_plan: compile_sql_plan(program),
+        migrations,
+        sql_plan,
         storage_catalog: program.data.values().cloned().collect(),
         frontend_assets: compile_frontend_assets(&program.pages),
         task_catalog: compile_task_catalog(program),
@@ -2567,6 +2592,17 @@ invariant "cron jobs have healthchecks"
                 && query.field == "owner"
                 && query.strategy == "indexed_lookup"
                 && query.sql == "SELECT * FROM `ChatSession` WHERE `owner` = ?;"
+        }));
+        assert!(artifacts
+            .migrations
+            .windows(2)
+            .all(|steps| steps[0].order < steps[1].order));
+        assert!(artifacts.migrations.iter().all(|step| {
+            step.phase == "pre_deploy"
+                && step.online
+                && step.resumable
+                && step.checkpoint_key.starts_with("migration:")
+                && !step.ddl.is_empty()
         }));
         assert_eq!(artifacts.frontend_assets[0].title, "Chat");
         assert_eq!(

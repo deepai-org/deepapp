@@ -29,6 +29,10 @@ fn cli_builds_example_artifacts() {
     assert!(manifest.contains("\"identity\": \"logged_in | api_key\""));
     assert!(manifest.contains("\"rate_limit\""));
     assert!(manifest.contains("\"limit\": 30"));
+    let migrations = fs::read_to_string(temp.join("migrations.json")).unwrap();
+    assert!(migrations.contains("\"phase\": \"pre_deploy\""));
+    assert!(migrations.contains("\"resumable\": true"));
+    assert!(migrations.contains("\"checkpoint_key\""));
     let storage_catalog = fs::read_to_string(temp.join("storage-catalog.json")).unwrap();
     assert!(storage_catalog.contains("\"name\": \"User\""));
     let sql_plan = fs::read_to_string(temp.join("sql-plan.json")).unwrap();
