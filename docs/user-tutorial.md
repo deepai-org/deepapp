@@ -130,7 +130,7 @@ docker compose run --rm compiler run examples/chat.deep \
   --redis-url redis://redis:6379
 ```
 
-With Redis configured, cache values are stored as Redis strings with declared TTLs, queues use FIFO Redis lists or sorted sets based on `sorted_by`, counters use atomic increments, and locks use token-checked `SET NX EX` acquisition. Cron, daemon, worker task ticks, and endpoint routes that call locked functions acquire their declared locks before running.
+With Redis configured, cache values are stored as Redis strings with declared TTLs, queues use FIFO Redis lists or sorted sets based on `sorted_by`, counters use atomic increments, locks use token-checked `SET NX EX` acquisition, and topics publish through Redis `PUBLISH`. Cron, daemon, worker task ticks, and endpoint routes that call locked functions acquire their declared locks before running.
 
 Resolve a model through the runtime catalog:
 
@@ -142,6 +142,12 @@ Look up pricing:
 
 ```sh
 curl -fsS http://127.0.0.1:8080/__deep/price/chat/gpt-5
+```
+
+Publish a topic event through the runtime:
+
+```sh
+curl -fsS -X POST http://127.0.0.1:8080/__deep/publish/model_updates
 ```
 
 ## Call Endpoints
@@ -220,6 +226,6 @@ This exercises cron, daemon, and worker metadata without starting real long-runn
 
 ## What To Expect From The Prototype
 
-Implemented prototype behavior includes parsing, static checks, artifact generation, generated page HTML, endpoint routing, metadata routes, in-memory storage, Redis-backed cache/queues/counters/locks when configured, declared Redis TTL and sorted-queue metadata, snapshots, endpoint identity policy, rate limits, model resolution, pricing, deterministic task ticks, task-level lock enforcement, and endpoint lock inheritance from called functions.
+Implemented prototype behavior includes parsing, static checks, artifact generation, generated page HTML, endpoint routing, metadata routes, in-memory storage, Redis-backed cache/queues/counters/locks/topics when configured, declared Redis TTL and sorted-queue metadata, snapshots, endpoint identity policy, rate limits, model resolution, pricing, deterministic task ticks, task-level lock enforcement, and endpoint lock inheritance from called functions.
 
-Not yet production-grade: arbitrary handler execution, real user/session authentication, pub/sub execution, distributed rate-limit cleanup/policy, real billing, provider calls, reactive browser behavior, real scheduled background loops, and always-on durable storage services.
+Not yet production-grade: arbitrary handler execution, real user/session authentication, distributed rate-limit cleanup/policy, real billing, provider calls, reactive browser behavior, real scheduled background loops, and always-on durable storage services.

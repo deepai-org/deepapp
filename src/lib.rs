@@ -406,6 +406,7 @@ struct StoreInner {
     queues: BTreeMap<String, VecDeque<serde_json::Value>>,
     counters: BTreeMap<String, i64>,
     locks: BTreeMap<String, LockEntry>,
+    topics: BTreeMap<String, Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Clone)]
@@ -421,6 +422,7 @@ pub struct StoreSnapshot {
     pub cache: BTreeMap<String, serde_json::Value>,
     pub queues: BTreeMap<String, Vec<serde_json::Value>>,
     pub counters: BTreeMap<String, i64>,
+    pub topics: BTreeMap<String, Vec<serde_json::Value>>,
 }
 
 impl RedisPrimitiveStore {
@@ -547,6 +549,12 @@ impl RedisPrimitiveStore {
         .arg(token)
         .invoke(&mut connection)?;
         Ok(deleted == 1)
+    }
+
+    fn topic_publish(&self, topic: &str, value: &serde_json::Value) -> anyhow::Result<i64> {
+        let mut connection = self.connection()?;
+        let encoded = serde_json::to_string(value)?;
+        Ok(connection.publish(self.key("topic", topic), encoded)?)
     }
 }
 
@@ -2099,6 +2107,24 @@ impl RuntimeApp {
         if method == "POST" && clean_path == "/__deep/task-tick" {
             return json_response(200, &self.run_task_tick());
         }
+        if method == "POST" && clean_path.starts_with("/__deep/publish/") {
+            let topic = clean_path.trim_start_matches("/__deep/publish/");
+            let subscribers = self.store.topic_publish(
+                topic,
+                serde_json::json!({
+                    "topic": topic,
+                    "source": "__deep/publish"
+                }),
+            );
+            return json_response(
+                200,
+                &serde_json::json!({
+                    "ok": true,
+                    "topic": topic,
+                    "subscribers": subscribers
+                }),
+            );
+        }
 
         let Some(route) = self
             .artifacts
@@ -2385,6 +2411,7 @@ impl MemoryStore {
                 queues: BTreeMap::new(),
                 counters: BTreeMap::new(),
                 locks: BTreeMap::new(),
+                topics: BTreeMap::new(),
             })),
             redis: None,
             primitives,
@@ -2643,6 +2670,19 @@ impl MemoryStore {
         false
     }
 
+    pub fn topic_publish(&self, topic: impl Into<String>, value: serde_json::Value) -> i64 {
+        let topic = topic.into();
+        if let Some(redis) = &self.redis {
+            return redis
+                .topic_publish(&topic, &value)
+                .expect("redis topic_publish failed");
+        }
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        let messages = inner.topics.entry(topic).or_default();
+        messages.push(value);
+        messages.len() as i64
+    }
+
     pub fn snapshot(&self) -> StoreSnapshot {
         let inner = self.inner.lock().expect("memory store lock poisoned");
         StoreSnapshot {
@@ -2655,6 +2695,7 @@ impl MemoryStore {
                 .map(|(name, queue)| (name.clone(), queue.iter().cloned().collect()))
                 .collect(),
             counters: inner.counters.clone(),
+            topics: inner.topics.clone(),
         }
     }
 
@@ -2669,6 +2710,7 @@ impl MemoryStore {
             .map(|(name, queue)| (name, VecDeque::from(queue)))
             .collect();
         inner.counters = snapshot.counters;
+        inner.topics = snapshot.topics;
     }
 
     pub fn save_snapshot(&self, path: &Path) -> anyhow::Result<()> {
@@ -3678,6 +3720,15 @@ invariant "cron jobs have healthchecks"
         assert!(!store.lock_release("billing:user-1", "worker-b"));
         assert!(store.lock_release("billing:user-1", "worker-a"));
         assert!(store.lock_acquire("billing:user-1", "worker-b", 30));
+
+        assert_eq!(
+            store.topic_publish("model_updates", serde_json::json!({ "model": "gpt-5" })),
+            1
+        );
+        assert_eq!(
+            store.snapshot().topics["model_updates"][0],
+            serde_json::json!({ "model": "gpt-5" })
+        );
     }
 
     #[test]
@@ -3685,11 +3736,15 @@ invariant "cron jobs have healthchecks"
         let Ok(redis_url) = std::env::var("REDIS_URL") else {
             return;
         };
+        use std::sync::mpsc;
+        use std::time::Duration;
+
         let suffix = format!("test_{}", std::process::id());
         let queue_name = format!("{suffix}_jobs");
         let cache_name = format!("{suffix}_cache");
+        let topic_name = format!("{suffix}_events");
         let source = format!(
-            "module redis.test\nqueue {queue_name}: Job sorted_by score {{ ttl: 1h }}\ncache {cache_name}[id: string] ttl 1h {{ type: Value }}\ncounter {suffix}_counter[id: string] window 60s\ntopic {suffix}_events: Event\ndata User {{ id: pk }}\n"
+            "module redis.test\nqueue {queue_name}: Job sorted_by score {{ ttl: 1h }}\ncache {cache_name}[id: string] ttl 1h {{ type: Value }}\ncounter {suffix}_counter[id: string] window 60s\ntopic {topic_name}: Event\ndata User {{ id: pk }}\n"
         );
         let artifacts = compile_source(&source).unwrap();
         let store = RuntimeApp::with_redis(artifacts, &redis_url)
@@ -3726,6 +3781,28 @@ invariant "cron jobs have healthchecks"
         assert!(!store.lock_release(&format!("{suffix}:lock"), "worker-b"));
         assert!(store.lock_release(&format!("{suffix}:lock"), "worker-a"));
         assert!(store.lock_acquire(&format!("{suffix}:lock"), "worker-b", 30));
+
+        let redis_url_for_thread = redis_url.clone();
+        let redis_topic = format!("deepapp:runtime:topic:{topic_name}");
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (message_tx, message_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let client = redis::Client::open(redis_url_for_thread).unwrap();
+            let mut connection = client.get_connection().unwrap();
+            let mut pubsub = connection.as_pubsub();
+            pubsub.subscribe(&redis_topic).unwrap();
+            ready_tx.send(()).unwrap();
+            let message = pubsub.get_message().unwrap();
+            let payload: String = message.get_payload().unwrap();
+            message_tx.send(payload).unwrap();
+        });
+        ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(
+            store.topic_publish(&topic_name, serde_json::json!({ "event": "published" })),
+            1
+        );
+        let payload = message_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(payload.contains("\"event\":\"published\""));
     }
 
     #[test]
