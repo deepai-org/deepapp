@@ -292,5 +292,48 @@
       "username"
     ],
     "unique_constraints": []
+  },
+  {
+    "name": "UserApiKey",
+    "fields": {
+      "created_at": {
+        "name": "created_at",
+        "raw_type": "datetime",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "id": {
+        "name": "id",
+        "raw_type": "pk",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      },
+      "key_hash": {
+        "name": "key_hash",
+        "raw_type": "string",
+        "pii": false,
+        "secret": true,
+        "no_index": false,
+        "unique": true
+      },
+      "user": {
+        "name": "user",
+        "raw_type": "User",
+        "pii": false,
+        "secret": false,
+        "no_index": false,
+        "unique": false
+      }
+    },
+    "indexes": [
+      "id",
+      "key_hash",
+      "user"
+    ],
+    "unique_constraints": []
   }
 ]

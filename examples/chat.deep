@@ -40,6 +40,16 @@ data User {
   index username
 }
 
+data UserApiKey {
+  id: pk
+  key_hash: string unique @secret
+  user: User
+  created_at: datetime default now()
+
+  index key_hash
+  index user
+}
+
 data ClientInfo {
   id: pk
   fingerprint: string unique

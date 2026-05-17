@@ -24,6 +24,7 @@ Start with [examples/chat.deep](../examples/chat.deep). It demonstrates the main
 - `queue`, `cache`, `cached fn`, `counter`, and `topic` declarations.
 - `model_config` and `pricing` declarations.
 - `worker`, `cron`, `daemon`, `services`, `cdn`, and `deploy_rules` blocks.
+- HTTP identity resolution for `api-key` headers, `session` cookies, and anonymous client fingerprints.
 - Compile-time safety checks for indexed queries, private data, secrets, notification channels, and operational contracts.
 
 ## Check A DeepApp File
@@ -226,6 +227,6 @@ This exercises cron, daemon, and worker metadata without starting real long-runn
 
 ## What To Expect From The Prototype
 
-Implemented prototype behavior includes parsing, static checks, artifact generation, generated page HTML, endpoint routing, metadata routes, in-memory storage, Redis-backed cache/queues/counters/locks/topics when configured, declared Redis TTL and sorted-queue metadata, snapshots, endpoint identity policy, rate limits, model resolution, pricing, native handler cache/queue/counter/indexed-query execution, deterministic task ticks, task-level lock enforcement, and endpoint lock inheritance from called functions.
+Implemented prototype behavior includes parsing, static checks, artifact generation, generated page HTML, endpoint routing, metadata routes, in-memory storage, Redis-backed cache/queues/counters/locks/topics when configured, declared Redis TTL and sorted-queue metadata, snapshots, endpoint identity policy, HTTP API-key/session/anonymous-client lookup, rate limits, model resolution, pricing, native handler cache/queue/counter/indexed-query execution, deterministic task ticks, task-level lock enforcement, and endpoint lock inheritance from called functions.
 
-Not yet production-grade: arbitrary handler execution, real user/session authentication, distributed rate-limit cleanup/policy, real billing, provider calls, reactive browser behavior, real scheduled background loops, and always-on durable storage services.
+Not yet production-grade: arbitrary handler execution, Django/Allauth/Google Auth integration, durable user/session authentication, distributed rate-limit cleanup/policy, real billing, provider calls, reactive browser behavior, real scheduled background loops, and always-on durable storage services.

@@ -173,7 +173,7 @@ Known gaps include:
 
 - Arbitrary handler bodies are not fully interpreted, though native example handlers now execute declared cache, queue, counter, billing, and indexed store-query operations.
 - Streaming uses SSE/chunked transfer for compiled stream routes, but provider-backed token streaming is still deterministic prototype data.
-- Authentication is deterministic header classification, not real user/session lookup.
+- Authentication resolves HTTP API keys against `UserApiKey` rows and session cookies against the `user_session` cache in the prototype runtime; full production user/session integration is still missing.
 - Rate limiting uses the configured counter backend, but it still lacks stale-bucket cleanup and a production policy engine.
 - Pricing is catalog lookup plus counters, not a billing ledger or payment integration.
 - Storage is in-memory with snapshot support. The compiler emits a MySQL-oriented SQL plan with indexed lookups, indexed range scans, primary-key `BETWEEN` scans, and static rejection for `IN` query shapes, but it does not yet execute against an always-on durable database service.
@@ -210,7 +210,7 @@ These are blocking for any serious production path.
 
 4. Real authentication and identity resolution
 
-   DeepAI's identity model is messy: `owner_id` vs `client_info_id`, anonymous-to-logged-in conversion, Django Allauth, and Google Auth. The `identity RequestIdentity` block captures the shape, but deterministic header classification is not enough. DeepApp needs session cookies, API key lookup against a real user table, and anonymous-to-owner dedup logic.
+   DeepAI's identity model is messy: `owner_id` vs `client_info_id`, anonymous-to-logged-in conversion, Django Allauth, and Google Auth. The `identity RequestIdentity` block captures the shape, and the prototype runtime now resolves `api-key` headers against `UserApiKey` records, `session` cookies against the `user_session` cache, and anonymous client fingerprints into `ClientInfo` rows. Remaining production work includes real Django/Allauth session integration, Google Auth, durable user tables, and anonymous-to-owner dedup on login.
 
 5. Redis as a real service
 

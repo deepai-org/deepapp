@@ -39,6 +39,14 @@
         "CREATE UNIQUE INDEX `idx_User_email` ON `User` (`email`);",
         "CREATE UNIQUE INDEX `idx_User_username` ON `User` (`username`);"
       ]
+    },
+    {
+      "table": "UserApiKey",
+      "create_table": "CREATE TABLE `UserApiKey` (\n  `created_at` DATETIME,\n  `id` BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,\n  `key_hash` TEXT,\n  `user` TEXT\n) ENGINE=InnoDB;",
+      "indexes": [
+        "CREATE UNIQUE INDEX `idx_UserApiKey_key_hash` ON `UserApiKey` (`key_hash`);",
+        "CREATE INDEX `idx_UserApiKey_user` ON `UserApiKey` (`user`);"
+      ]
     }
   ],
   "queries": [

@@ -122,5 +122,28 @@
     "checkpoint_key": "migration:User:create_or_reconcile",
     "resume_policy": "checkpoint_before_each_ddl_statement",
     "bail_out": "stop_before_next_statement_and_keep_checkpoint"
+  },
+  {
+    "table": "UserApiKey",
+    "action": "create_or_reconcile",
+    "order": 6,
+    "phase": "pre_deploy",
+    "online": true,
+    "resumable": true,
+    "lock_risk": "metadata_lock_only_for_new_table_or_online_additive_column_changes",
+    "ddl": [
+      "CREATE TABLE `UserApiKey` (\n  `created_at` DATETIME,\n  `id` BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,\n  `key_hash` TEXT,\n  `user` TEXT\n) ENGINE=InnoDB;",
+      "CREATE UNIQUE INDEX `idx_UserApiKey_key_hash` ON `UserApiKey` (`key_hash`);",
+      "CREATE INDEX `idx_UserApiKey_user` ON `UserApiKey` (`user`);"
+    ],
+    "safe_column_add": true,
+    "additive_ddl": [
+      "ALTER TABLE `UserApiKey` ADD COLUMN `created_at` DATETIME, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `UserApiKey` ADD COLUMN `key_hash` TEXT, ALGORITHM=INPLACE, LOCK=NONE;",
+      "ALTER TABLE `UserApiKey` ADD COLUMN `user` TEXT, ALGORITHM=INPLACE, LOCK=NONE;"
+    ],
+    "checkpoint_key": "migration:UserApiKey:create_or_reconcile",
+    "resume_policy": "checkpoint_before_each_ddl_statement",
+    "bail_out": "stop_before_next_statement_and_keep_checkpoint"
   }
 ]

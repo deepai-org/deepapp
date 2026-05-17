@@ -2270,12 +2270,12 @@ impl RuntimeApp {
             .split_whitespace();
         let method = request_line.next().unwrap_or("GET");
         let path = request_line.next().unwrap_or("/");
-        let identity = identity_from_http(&request);
         let ip = header_value(&request, "x-forwarded-for")
             .and_then(|value| value.split(',').next())
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .unwrap_or("127.0.0.1");
+        let identity = identity_from_http(&request, &self.store, ip);
         let response = self.handle_as(method, path, identity, ip);
         write_http_response(&mut stream, response)?;
         Ok(())
@@ -3084,18 +3084,27 @@ fn find_or_create_record(
     value: serde_json::Value,
     defaults: JsonRecord,
 ) -> u64 {
+    try_find_or_create_record(store, data, field, value, defaults)
+        .expect("native handler record create failed")
+}
+
+fn try_find_or_create_record(
+    store: &MemoryStore,
+    data: &str,
+    field: &str,
+    value: serde_json::Value,
+    defaults: JsonRecord,
+) -> Result<u64, StoreError> {
     if let Ok(records) = store.where_eq(data, field, &value) {
         if let Some(id) = records
             .first()
             .and_then(|record| record.get("id"))
             .and_then(serde_json::Value::as_u64)
         {
-            return id;
+            return Ok(id);
         }
     }
-    store
-        .create(data, defaults)
-        .expect("native handler record create failed")
+    store.create(data, defaults)
 }
 
 fn evaluate_handler_response(
@@ -3134,18 +3143,52 @@ fn route_params(pattern: &str, path: &str) -> BTreeMap<String, String> {
     params
 }
 
-fn identity_from_http(request: &str) -> RuntimeIdentity {
-    if header_value(request, "api-key").is_some() {
-        RuntimeIdentity::ApiKey
-    } else if header_value(request, "authorization").is_some()
-        || header_value(request, "cookie")
-            .map(|cookie| cookie.contains("session="))
-            .unwrap_or(false)
+fn identity_from_http(request: &str, store: &MemoryStore, ip: &str) -> RuntimeIdentity {
+    if header_value(request, "api-key")
+        .and_then(|key| resolve_api_key(store, key))
+        .is_some()
     {
-        RuntimeIdentity::LoggedIn
-    } else {
-        RuntimeIdentity::Anonymous
+        return RuntimeIdentity::ApiKey;
     }
+    if header_value(request, "cookie")
+        .and_then(session_cookie)
+        .and_then(|session_id| store.cache_get(&format!("user_session:{session_id}")))
+        .is_some()
+    {
+        return RuntimeIdentity::LoggedIn;
+    }
+    resolve_anonymous_client(store, request, ip);
+    RuntimeIdentity::Anonymous
+}
+
+fn resolve_api_key(store: &MemoryStore, key: &str) -> Option<u64> {
+    store
+        .where_eq("UserApiKey", "key_hash", &serde_json::json!(key))
+        .ok()?
+        .first()
+        .and_then(|record| record.get("user"))
+        .and_then(serde_json::Value::as_u64)
+}
+
+fn session_cookie(cookie: &str) -> Option<&str> {
+    cookie.split(';').find_map(|part| {
+        let (name, value) = part.trim().split_once('=')?;
+        (name == "session" && !value.is_empty()).then_some(value)
+    })
+}
+
+fn resolve_anonymous_client(store: &MemoryStore, request: &str, ip: &str) {
+    let fingerprint = header_value(request, "x-client-fingerprint").unwrap_or(ip);
+    let _ = try_find_or_create_record(
+        store,
+        "ClientInfo",
+        "fingerprint",
+        serde_json::json!(fingerprint),
+        JsonRecord::from([
+            ("fingerprint".into(), serde_json::json!(fingerprint)),
+            ("ip_address".into(), serde_json::json!(ip)),
+        ]),
+    );
 }
 
 fn header_value<'a>(request: &'a str, name: &str) -> Option<&'a str> {
@@ -3263,6 +3306,21 @@ data User {
   password_hash: string @secret
   locked: bool default false
   index email
+}
+
+data UserApiKey {
+  id: pk
+  key_hash: string unique @secret
+  user: User
+  index key_hash
+  index user
+}
+
+data ClientInfo {
+  id: pk
+  fingerprint: string unique
+  ip_address: string @pii
+  index fingerprint
 }
 
 data ChatSession {
@@ -3698,6 +3756,66 @@ invariant "cron jobs have healthchecks"
         );
         assert_eq!(api_key.status, 200);
         assert!(api_key.body.contains("research-2"));
+    }
+
+    #[test]
+    fn http_identity_resolves_sessions_api_keys_and_anonymous_clients() {
+        let runtime = RuntimeApp::new(compile_source(valid_program()).unwrap());
+        let store = runtime.store();
+        let user_id = store
+            .create(
+                "User",
+                JsonRecord::from([
+                    ("email".into(), serde_json::json!("auth@deep.test")),
+                    ("password_hash".into(), serde_json::json!("hashed")),
+                ]),
+            )
+            .unwrap();
+        store
+            .create(
+                "UserApiKey",
+                JsonRecord::from([
+                    ("key_hash".into(), serde_json::json!("dev-key")),
+                    ("user".into(), serde_json::json!(user_id)),
+                ]),
+            )
+            .unwrap();
+        store.cache_set(
+            "user_session:session-1",
+            serde_json::json!({ "user_id": user_id }),
+        );
+
+        assert_eq!(
+            identity_from_http(
+                "GET / HTTP/1.1\r\napi-key: dev-key\r\n\r\n",
+                &store,
+                "127.0.0.1"
+            ),
+            RuntimeIdentity::ApiKey
+        );
+        assert_eq!(
+            identity_from_http(
+                "GET / HTTP/1.1\r\ncookie: session=session-1\r\n\r\n",
+                &store,
+                "127.0.0.1"
+            ),
+            RuntimeIdentity::LoggedIn
+        );
+        assert_eq!(
+            identity_from_http(
+                "GET / HTTP/1.1\r\napi-key: missing\r\nx-client-fingerprint: fp-1\r\n\r\n",
+                &store,
+                "203.0.113.9"
+            ),
+            RuntimeIdentity::Anonymous
+        );
+        assert_eq!(
+            store
+                .where_eq("ClientInfo", "fingerprint", &serde_json::json!("fp-1"))
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
