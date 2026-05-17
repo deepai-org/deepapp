@@ -169,6 +169,8 @@ Known gaps include:
 
 The goal of the repo is to keep tightening those gaps behind tests while preserving a Docker-first workflow.
 
+DeepApp should absorb APIs and runtime semantics for open-source infrastructure where that makes the language simpler and safer, such as Redis for cache, queues, counters, pub/sub, and locks. Proprietary services should remain provider integrations or adapters. Their operational details should not become DeepApp language/runtime internals.
+
 ## Next Steps
 
 ### Must-haves
@@ -213,7 +215,7 @@ These would block most useful application slices.
 
 8. Worker/GPU integration
 
-   The `worker stable_diffusion` block is expressive, but it needs to actually talk to Vast/Salad APIs, manage Docker images, and read/write Redis queues in the format the existing `ai_integration` worker code expects.
+   The `worker stable_diffusion` block is expressive, but the boundary matters. DeepApp should absorb the open-source pieces it can own, such as Docker image contracts and Redis-backed queues. Proprietary services such as Vast and Salad should remain provider adapters. DeepApp should call those adapters through typed interfaces rather than absorbing their private APIs or operational details into the core language/runtime.
 
 9. Distributed locks that work under concurrency
 
