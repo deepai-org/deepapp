@@ -11,7 +11,7 @@ This repository currently contains a Rust implementation of a compiler frontend,
 - Generate JSON artifacts for routes, services, SQL planning, storage, migrations, frontend assets, background tasks, models, and pricing.
 - Run a local HTTP runtime for compiled pages and endpoints.
 - Serve `response: stream` endpoints as Server-Sent Events over HTTP chunked transfer.
-- Generate CDN-aware frontend assets with cache policy, API base URL, and client-fetch data loading metadata.
+- Generate CDN-aware frontend assets with cache policy, API base URL, client-fetch data loading metadata, and a browser bootstrap that fetches page data outside cached HTML.
 - Serve runtime metadata through `/__deep/*` routes.
 - Exercise in-memory storage, Redis-backed cache/queues/counters/locks/pub-sub with declared TTL and sorted-queue metadata, snapshots, model fallback, pricing, rate limiting, and deterministic task ticks.
 
@@ -178,7 +178,7 @@ Known gaps include:
 - Pricing is catalog lookup plus counters, not a billing ledger or payment integration.
 - Storage is in-memory with snapshot support. The compiler emits a MySQL-oriented SQL plan with indexed lookups, indexed range scans, primary-key `BETWEEN` scans, and static rejection for `IN` query shapes, but it does not yet execute against an always-on durable database service.
 - Redis can back cache, FIFO queue, sorted-set queue, counter, TTL lock, and topic pub/sub primitives when configured. Cron, daemon, worker task ticks, and endpoint routes that call locked functions now acquire declared locks before running.
-- Frontend output is CDN-aware generated HTML metadata, not a reactive browser runtime.
+- Frontend output is CDN-aware generated HTML with a client-side page-data fetch bootstrap, but not a full reactive browser runtime.
 - Cron, daemon, and worker behavior runs through deterministic ticks, not real schedulers.
 - External providers such as OpenAI, Stripe, AWS, and S3 are represented as metadata, not real calls.
 
@@ -226,7 +226,7 @@ These would block most useful application slices.
 
 7. CDN-aware page serving
 
-   The `cdn` block and `cache private` page annotation are pointed in the right direction, but the critical constraint is stricter: never render user data in cached pages; load it client-side via the correct app/API base URL. Generated frontend assets now carry cache policy, `api_base_url`, and `client_fetch` metadata and expose those in HTML. The remaining production work is turning that metadata into a real reactive browser data-loading runtime.
+   The `cdn` block and `cache private` page annotation are pointed in the right direction, but the critical constraint is stricter: never render user data in cached pages; load it client-side via the correct app/API base URL. Generated frontend assets now carry cache policy, `api_base_url`, and `client_fetch` metadata, expose those in HTML, and bootstrap a credentialed fetch to `/__deep/page-data/{page}` so cached HTML stays data-free. The remaining production work is turning that bootstrap into a full reactive browser data-loading runtime.
 
 8. Worker/GPU integration
 

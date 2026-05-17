@@ -15,6 +15,6 @@
       "sessions",
       "streaming"
     ],
-    "html": "<!doctype html><html><head><title>Chat</title><meta name=\"deepapp-page\" content=\"chat\"><meta name=\"deepapp-cache\" content=\"private\"><meta name=\"deepapp-data-loading\" content=\"client_fetch\"></head><body><main data-route=\"/\" data-api-base=\"https://api.deepai.org\" data-cache=\"private\" data-data-loading=\"client_fetch\" data-components=\"ChatPage\" data-states=\"input,messages,sessions,streaming\"><h1>Chat</h1></main><script>window.__DEEPAPP__={apiBase:\"https://api.deepai.org\",cache:\"private\",dataLoading:\"client_fetch\"};</script></body></html>"
+    "html": "<!doctype html><html><head><title>Chat</title><meta name=\"deepapp-page\" content=\"chat\"><meta name=\"deepapp-cache\" content=\"private\"><meta name=\"deepapp-data-loading\" content=\"client_fetch\"></head><body><main data-route=\"/\" data-api-base=\"https://api.deepai.org\" data-cache=\"private\" data-data-loading=\"client_fetch\" data-components=\"ChatPage\" data-states=\"input,messages,sessions,streaming\"><h1>Chat</h1></main><script>window.__DEEPAPP__={apiBase:\"https://api.deepai.org\",cache:\"private\",dataLoading:\"client_fetch\",dataUrl:\"https://api.deepai.org/__deep/page-data/chat\"};if(window.__DEEPAPP__.dataLoading===\"client_fetch\"){fetch(window.__DEEPAPP__.dataUrl,{credentials:\"include\"}).then(r=>r.json()).then(data=>{window.__DEEPAPP__.data=data;document.dispatchEvent(new CustomEvent(\"deepapp:data\",{detail:data}));});}</script></body></html>"
   }
 ]

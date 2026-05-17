@@ -2055,12 +2055,14 @@ fn render_frontend_html(
         CacheMode::Public | CacheMode::Private => "client_fetch",
         CacheMode::Unspecified => "runtime_default",
     };
+    let data_url = format!("{}/__deep/page-data/{}", api_base_url, page.name);
     format!(
-        "<!doctype html><html><head><title>{title}</title><meta name=\"deepapp-page\" content=\"{page_name}\"><meta name=\"deepapp-cache\" content=\"{cache_mode}\"><meta name=\"deepapp-data-loading\" content=\"{data_loading}\"></head><body><main data-route=\"{path}\" data-api-base=\"{api_base}\" data-cache=\"{cache_mode}\" data-data-loading=\"{data_loading}\" data-components=\"{components}\" data-states=\"{states}\"><h1>{title}</h1></main><script>window.__DEEPAPP__={{apiBase:\"{api_base}\",cache:\"{cache_mode}\",dataLoading:\"{data_loading}\"}};</script></body></html>",
+        "<!doctype html><html><head><title>{title}</title><meta name=\"deepapp-page\" content=\"{page_name}\"><meta name=\"deepapp-cache\" content=\"{cache_mode}\"><meta name=\"deepapp-data-loading\" content=\"{data_loading}\"></head><body><main data-route=\"{path}\" data-api-base=\"{api_base}\" data-cache=\"{cache_mode}\" data-data-loading=\"{data_loading}\" data-components=\"{components}\" data-states=\"{states}\"><h1>{title}</h1></main><script>window.__DEEPAPP__={{apiBase:\"{api_base}\",cache:\"{cache_mode}\",dataLoading:\"{data_loading}\",dataUrl:\"{data_url}\"}};if(window.__DEEPAPP__.dataLoading===\"client_fetch\"){{fetch(window.__DEEPAPP__.dataUrl,{{credentials:\"include\"}}).then(r=>r.json()).then(data=>{{window.__DEEPAPP__.data=data;document.dispatchEvent(new CustomEvent(\"deepapp:data\",{{detail:data}}));}});}}</script></body></html>",
         title = html_escape(title),
         page_name = html_escape(&page.name),
         path = html_escape(&page.path),
         api_base = html_escape(&api_base_url),
+        data_url = html_escape(&data_url),
         cache_mode = cache_mode,
         data_loading = data_loading,
         components = component_attrs,
@@ -2168,6 +2170,10 @@ impl RuntimeApp {
         }
         if method == "GET" && clean_path == "/__deep/snapshot" {
             return json_response(200, &self.store.snapshot());
+        }
+        if method == "GET" && clean_path.starts_with("/__deep/page-data/") {
+            let page = clean_path.trim_start_matches("/__deep/page-data/");
+            return page_data_response(page, &self.artifacts.frontend_assets);
         }
         if method == "POST" && clean_path == "/__deep/task-tick" {
             return json_response(200, &self.run_task_tick());
@@ -2825,6 +2831,27 @@ fn page_response(route: &RoutePlan, assets: &[FrontendAsset]) -> RuntimeResponse
         ),
         chunked: false,
     }
+}
+
+fn page_data_response(page: &str, assets: &[FrontendAsset]) -> RuntimeResponse {
+    let Some(asset) = assets.iter().find(|asset| asset.page == page) else {
+        return json_error(404, "page data not found");
+    };
+    let states = asset
+        .states
+        .iter()
+        .map(|state| (state.clone(), serde_json::json!([])))
+        .collect::<serde_json::Map<_, _>>();
+    json_response(
+        200,
+        &serde_json::json!({
+            "page": asset.page,
+            "path": asset.path,
+            "cache": asset.cache,
+            "data_loading": asset.data_loading,
+            "states": states
+        }),
+    )
 }
 
 fn enforce_identity(route: &RoutePlan, identity: RuntimeIdentity) -> Option<RuntimeResponse> {
@@ -3678,6 +3705,13 @@ invariant "cron jobs have healthchecks"
         assert_eq!(page.content_type, "text/html; charset=utf-8");
         assert!(page.body.contains("<h1>Chat</h1>"));
         assert!(page.body.contains("data-route=\"/\""));
+        assert!(page.body.contains("/__deep/page-data/chat"));
+        assert!(page.body.contains("credentials:\"include\""));
+
+        let page_data = runtime.handle("GET", "/__deep/page-data/chat");
+        assert_eq!(page_data.status, 200);
+        assert!(page_data.body.contains("\"data_loading\":\"client_fetch\""));
+        assert!(page_data.body.contains("\"states\""));
 
         let endpoint = runtime.handle("POST", "/hacking_is_a_serious_crime");
         assert_eq!(endpoint.status, 200);

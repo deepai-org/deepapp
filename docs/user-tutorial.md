@@ -59,7 +59,7 @@ The build writes JSON files that describe the app:
 - `migrations.json`: ordered pre-deploy migration plan with online/resumable metadata, safe additive column DDL, lock-risk notes, checkpoint keys, and bail/resume policy.
 - `sql-plan.json`: MySQL-oriented table DDL, index DDL, indexed lookup plans, and indexed range plans including primary-key `BETWEEN` scans.
 - `storage-catalog.json`: data schemas, indexes, uniqueness, and privacy/security flags.
-- `frontend-assets.json`: generated page assets with cache policy, API base URL, and client-fetch data-loading metadata.
+- `frontend-assets.json`: generated page assets with cache policy, API base URL, and client-fetch page-data bootstrap metadata.
 - `task-catalog.json`: cron, daemon, and worker metadata.
 - `model-catalog.json`: model provider metadata.
 - `pricing-catalog.json`: category/model prices in cents.
@@ -227,6 +227,6 @@ This exercises cron, daemon, and worker metadata without starting real long-runn
 
 ## What To Expect From The Prototype
 
-Implemented prototype behavior includes parsing, static checks, artifact generation, generated page HTML, endpoint routing, metadata routes, in-memory storage, Redis-backed cache/queues/counters/locks/topics when configured, declared Redis TTL and sorted-queue metadata, snapshots, endpoint identity policy, HTTP API-key/session/anonymous-client lookup, rate limits, model resolution, pricing, native handler cache/queue/counter/indexed-query execution, deterministic task ticks, task-level lock enforcement, and endpoint lock inheritance from called functions.
+Implemented prototype behavior includes parsing, static checks, artifact generation, generated page HTML, client-side page-data bootstrap, endpoint routing, metadata routes, in-memory storage, Redis-backed cache/queues/counters/locks/topics when configured, declared Redis TTL and sorted-queue metadata, snapshots, endpoint identity policy, HTTP API-key/session/anonymous-client lookup, rate limits, model resolution, pricing, native handler cache/queue/counter/indexed-query execution, deterministic task ticks, task-level lock enforcement, and endpoint lock inheritance from called functions.
 
 Not yet production-grade: arbitrary handler execution, Django/Allauth/Google Auth integration, durable user/session authentication, distributed rate-limit cleanup/policy, real billing, provider calls, reactive browser behavior, real scheduled background loops, and always-on durable storage services.
