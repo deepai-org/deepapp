@@ -40,7 +40,7 @@ Expected result:
 DeepApp check passed: examples/chat.deep
 ```
 
-If the compiler finds a problem, it prints a DeepApp error code. For example, querying a `@no_index` field can produce a `DB021` error, and notifying an undeclared channel can produce `NOTIFY002`.
+If the compiler finds a problem, it prints a DeepApp error code. For example, querying a `@no_index` field can produce a `DB021` error, using an unsafe `IN` query shape can produce a `DB022` error, and notifying an undeclared channel can produce `NOTIFY002`.
 
 ## Build Artifacts
 
@@ -56,7 +56,7 @@ The build writes JSON files that describe the app:
 - `static-report.json`: language-unit counts, invariants, and checked compiler rules.
 - `runtime-bundle.json`: what runtime capabilities the app needs.
 - `migrations.json`: ordered pre-deploy migration plan with online/resumable metadata, DDL, lock-risk notes, and checkpoint keys.
-- `sql-plan.json`: MySQL-oriented table DDL, index DDL, and indexed query plans.
+- `sql-plan.json`: MySQL-oriented table DDL, index DDL, indexed lookup plans, and indexed range plans including primary-key `BETWEEN` scans.
 - `storage-catalog.json`: data schemas, indexes, uniqueness, and privacy/security flags.
 - `frontend-assets.json`: generated page assets with cache policy, API base URL, and client-fetch data-loading metadata.
 - `task-catalog.json`: cron, daemon, and worker metadata.

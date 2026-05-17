@@ -8,7 +8,7 @@ Objective: implement DeepApp design v2 with a Docker-first workflow, TDD, and cl
 - Parser and AST inventory for v2 language declarations.
 - Static analyzer for the core design rules that are currently enforceable from source text.
 - Build artifact generator for deployment manifest, static report, runtime bundle description, and migration plan.
-- MySQL-oriented SQL planning artifact for declared tables, indexes, and indexed `where(...)` query patterns.
+- MySQL-oriented SQL planning artifact for declared tables, indexes, indexed `where(...)` lookup/range query patterns, and primary-key `BETWEEN` scans.
 - Ordered online migration planning metadata with DDL, pre-deploy phase, lock-risk notes, resumability, and checkpoint keys.
 - Executable runtime slice for compiled pages/endpoints, health checks, and compiler metadata routes.
 - SSE/chunked-transfer runtime response path for endpoints declared with `response: stream`.
@@ -35,7 +35,7 @@ Objective: implement DeepApp design v2 with a Docker-first workflow, TDD, and cl
   - `docker-compose.yml` defines `compiler`, `runtime`, `redis`, `test`, and `fmt` services.
   - `Makefile` wraps Docker commands for build, test, check, build example, migration preview, and runtime start.
 - TDD coverage:
-  - `src/lib.rs` unit tests cover indexed query validation, secret/PII flow rejection, public page isolation, notification channel validation, cron contracts, deploy rules, construct inventory, and manifest routing.
+  - `src/lib.rs` unit tests cover indexed query validation, unsafe `IN` query rejection, primary-key `BETWEEN` planning, secret/PII flow rejection, public page isolation, notification channel validation, cron contracts, deploy rules, construct inventory, and manifest routing.
   - Runtime tests cover `/ping`, page rendering, endpoint routing, metadata routes, 404s, and method rejection.
   - Frontend tests verify page declarations become generated HTML served by the runtime, with CDN API base URL and client-fetch data-loading metadata.
   - Storage tests cover record creation/read, unique fields, indexed query enforcement, cache get/set, FIFO queues, counters, and lock acquire/release.
@@ -56,7 +56,7 @@ Objective: implement DeepApp design v2 with a Docker-first workflow, TDD, and cl
   - `build/manifest.json` records services, routes, route kind/method, endpoint identity/rate-limit policies, CDN, health check, and rollback policy.
   - `build/manifest.json` records endpoint lock names and lock TTLs inherited from direct endpoint locks or called locked functions.
   - `build/migrations.json` records ordered pre-deploy migration steps with DDL, online/resumable flags, lock-risk notes, and checkpoint keys.
-  - `build/sql-plan.json` records MySQL table DDL, index DDL, and indexed query plans derived from `data` declarations and handler query expressions.
+  - `build/sql-plan.json` records MySQL table DDL, index DDL, indexed lookup plans, indexed range plans, and primary-key `BETWEEN` plans derived from `data` declarations and handler query expressions.
   - `build/frontend-assets.json` records page assets generated from `view` blocks, including cache policy, API base URL, and client-fetch data-loading metadata.
   - `build/storage-catalog.json` records data schemas, fields, indexes, and privacy/security flags used by the runtime store.
   - `build/task-catalog.json` records cron, daemon, and worker execution metadata, including parsed lock names and lock TTLs.

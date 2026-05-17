@@ -41,6 +41,8 @@ fn cli_builds_example_artifacts() {
     let sql_plan = fs::read_to_string(temp.join("sql-plan.json")).unwrap();
     assert!(sql_plan.contains("\"dialect\": \"mysql\""));
     assert!(sql_plan.contains("idx_ChatSession_owner"));
+    assert!(sql_plan.contains("\"strategy\": \"pk_range_scan\""));
+    assert!(sql_plan.contains("BETWEEN ? AND ?"));
     let frontend_assets = fs::read_to_string(temp.join("frontend-assets.json")).unwrap();
     assert!(frontend_assets.contains("\"page\": \"chat\""));
     assert!(frontend_assets.contains("\"api_base_url\": \"https://api.deepai.org\""));

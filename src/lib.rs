@@ -590,6 +590,8 @@ pub enum DeepError {
     Parse { line: usize, text: String },
     #[error("DB021: {data}.{field} is not indexed. Use a primary-key range or add an index.")]
     QueryOnUnindexedField { data: String, field: String },
+    #[error("DB022: {data}.{field} uses IN. Use BETWEEN or indexed range scans instead.")]
+    QueryUsesInList { data: String, field: String },
     #[error("SEC002: @secret field cannot be interpolated into log or notify: {data}.{field}")]
     SecretFlow { data: String, field: String },
     #[error("LOG004: @pii field in log. Use redact() or hash(): {data}.{field}")]
@@ -1475,7 +1477,8 @@ fn check_queries(program: &Program, errors: &mut Vec<DeepError>) {
     for data in program.data.values() {
         for field in data.fields.values() {
             let direct_field = format!("_.{}", field.name);
-            let indexed = data.indexes.contains(&field.name) && !field.no_index;
+            let indexed =
+                (data.indexes.contains(&field.name) || field.raw_type == "pk") && !field.no_index;
             let query_on_field = source.lines().any(|line| {
                 line.contains(&format!("{} |>", data.name))
                     && line.contains("where(")
@@ -1483,6 +1486,17 @@ fn check_queries(program: &Program, errors: &mut Vec<DeepError>) {
             });
             if !indexed && query_on_field {
                 errors.push(DeepError::QueryOnUnindexedField {
+                    data: data.name.clone(),
+                    field: field.name.clone(),
+                });
+            }
+            let in_query_on_field = source.lines().any(|line| {
+                line.contains(&format!("{} |>", data.name))
+                    && line.contains("where(")
+                    && line.contains(&format!("{} in ", direct_field))
+            });
+            if in_query_on_field {
+                errors.push(DeepError::QueryUsesInList {
                     data: data.name.clone(),
                     field: field.name.clone(),
                 });
@@ -1581,41 +1595,65 @@ fn mysql_type(field: &FieldDecl) -> &'static str {
 }
 
 fn compile_sql_queries(program: &Program) -> Vec<SqlQueryPlan> {
-    let query_re =
+    let comparison_re =
         Regex::new(r"([A-Za-z][A-Za-z0-9_]*)\s*\|>\s*where\(_\.([A-Za-z][A-Za-z0-9_]*)\s*(==|>=|<=|>|<)\s*([^)]+)\)").unwrap();
+    let between_re =
+        Regex::new(r"([A-Za-z][A-Za-z0-9_]*)\s*\|>\s*where\(_\.([A-Za-z][A-Za-z0-9_]*)\s+between\s+(.+?)\s+and\s+(.+?)\)").unwrap();
     let source = all_bodies(program);
     let mut plans = Vec::new();
     for line in source.lines().map(str::trim) {
-        let Some(caps) = query_re.captures(line) else {
-            continue;
-        };
-        let table = caps[1].to_string();
-        let field = caps[2].to_string();
-        let Some(data) = program.data.get(&table) else {
-            continue;
-        };
-        let Some(field_decl) = data.fields.get(&field) else {
-            continue;
-        };
-        if !data.indexes.contains(&field) || field_decl.no_index {
+        if let Some(caps) = comparison_re.captures(line) {
+            let table = caps[1].to_string();
+            let field = caps[2].to_string();
+            if !field_has_queryable_index(program, &table, &field) {
+                continue;
+            }
+            let op = mysql_operator(&caps[3]);
+            plans.push(SqlQueryPlan {
+                source: line.to_string(),
+                table: table.clone(),
+                field: field.clone(),
+                index: mysql_index_name(&table, &field),
+                strategy: query_strategy(&field, op),
+                sql: format!("SELECT * FROM `{table}` WHERE `{field}` {op} ?;"),
+            });
             continue;
         }
-        let op = mysql_operator(&caps[3]);
-        let index = if field == "id" {
-            "PRIMARY".into()
-        } else {
-            format!("idx_{table}_{field}")
-        };
-        plans.push(SqlQueryPlan {
-            source: line.to_string(),
-            table: table.clone(),
-            field: field.clone(),
-            index,
-            strategy: query_strategy(&field, op),
-            sql: format!("SELECT * FROM `{table}` WHERE `{field}` {op} ?;"),
-        });
+        if let Some(caps) = between_re.captures(line) {
+            let table = caps[1].to_string();
+            let field = caps[2].to_string();
+            if !field_has_queryable_index(program, &table, &field) {
+                continue;
+            }
+            plans.push(SqlQueryPlan {
+                source: line.to_string(),
+                table: table.clone(),
+                field: field.clone(),
+                index: mysql_index_name(&table, &field),
+                strategy: query_strategy(&field, "BETWEEN"),
+                sql: format!("SELECT * FROM `{table}` WHERE `{field}` BETWEEN ? AND ?;"),
+            });
+        }
     }
     plans
+}
+
+fn field_has_queryable_index(program: &Program, table: &str, field: &str) -> bool {
+    let Some(data) = program.data.get(table) else {
+        return false;
+    };
+    let Some(field_decl) = data.fields.get(field) else {
+        return false;
+    };
+    (data.indexes.contains(field) || field_decl.raw_type == "pk") && !field_decl.no_index
+}
+
+fn mysql_index_name(table: &str, field: &str) -> String {
+    if field == "id" {
+        "PRIMARY".into()
+    } else {
+        format!("idx_{table}_{field}")
+    }
 }
 
 fn mysql_operator(op: &str) -> &'static str {
@@ -3159,6 +3197,13 @@ data ChatSession {
   index owner
 }
 
+data ChatMessage {
+  id: pk
+  session: ChatSession
+  content: string
+  index session
+}
+
 queue research_tasks: ResearchTask sorted_by created_at { ttl: 1h }
 cache user_session[session_id: uuid] ttl 1h { type: SessionData }
 cached fn research_status[task_id: uuid] -> ResearchStatus ttl 1h
@@ -3184,6 +3229,7 @@ endpoint POST /hacking_is_a_serious_crime {
   handle {
     user = User[email: "foo@bar.com"]
     by_owner = ChatSession |> where(_.owner == user)
+    recent_messages = ChatMessage |> where(_.id between request.after_id and request.before_id)
     charge_for_usage(user, "chat", "gpt-4.1")
     notify errors "request accepted"
   }
@@ -3322,6 +3368,13 @@ invariant "cron jobs have healthchecks"
                 && query.strategy == "indexed_lookup"
                 && query.sql == "SELECT * FROM `ChatSession` WHERE `owner` = ?;"
         }));
+        assert!(artifacts.sql_plan.queries.iter().any(|query| {
+            query.table == "ChatMessage"
+                && query.field == "id"
+                && query.index == "PRIMARY"
+                && query.strategy == "pk_range_scan"
+                && query.sql == "SELECT * FROM `ChatMessage` WHERE `id` BETWEEN ? AND ?;"
+        }));
         assert!(artifacts
             .migrations
             .windows(2)
@@ -3391,6 +3444,19 @@ invariant "cron jobs have healthchecks"
         assert!(errors.contains(&DeepError::QueryOnUnindexedField {
             data: "ChatSession".into(),
             field: "created_at".into()
+        }));
+    }
+
+    #[test]
+    fn rejects_in_queries_for_production_planning() {
+        let source = valid_program().replace(
+            "by_owner = ChatSession |> where(_.owner == user)",
+            "by_ids = ChatSession |> where(_.id in request.session_ids)",
+        );
+        let errors = compile_source(&source).unwrap_err();
+        assert!(errors.contains(&DeepError::QueryUsesInList {
+            data: "ChatSession".into(),
+            field: "id".into()
         }));
     }
 

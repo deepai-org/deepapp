@@ -7,7 +7,7 @@ This repository currently contains a Rust implementation of a compiler frontend,
 ## What Works
 
 - Parse a representative DeepApp v2 application.
-- Run static checks for indexed queries, private page access, secret/PII flows, notification channels, cron/daemon contracts, deploy rules, endpoint identity, and rate limits.
+- Run static checks for indexed queries, unsafe `IN` query shapes, private page access, secret/PII flows, notification channels, cron/daemon contracts, deploy rules, endpoint identity, and rate limits.
 - Generate JSON artifacts for routes, services, SQL planning, storage, migrations, frontend assets, background tasks, models, and pricing.
 - Run a local HTTP runtime for compiled pages and endpoints.
 - Serve `response: stream` endpoints as Server-Sent Events over HTTP chunked transfer.
@@ -90,7 +90,7 @@ Running `deep build` writes these files into `build/`:
 - `static-report.json`: language unit counts, invariants, checked rules.
 - `runtime-bundle.json`: runtime capability summary.
 - `migrations.json`: ordered pre-deploy migration plan with online/resumable metadata, DDL, lock-risk notes, and checkpoint keys.
-- `sql-plan.json`: MySQL-oriented table DDL, index DDL, and indexed query plans.
+- `sql-plan.json`: MySQL-oriented table DDL, index DDL, indexed lookup plans, and indexed range plans including primary-key `BETWEEN` scans.
 - `storage-catalog.json`: data schemas, fields, indexes, uniqueness, privacy/security flags.
 - `frontend-assets.json`: generated page assets.
 - `task-catalog.json`: cron, daemon, and worker metadata.
@@ -176,7 +176,7 @@ Known gaps include:
 - Authentication is deterministic header classification, not real user/session lookup.
 - Rate limiting uses the configured counter backend, but it still lacks stale-bucket cleanup and a production policy engine.
 - Pricing is catalog lookup plus counters, not a billing ledger or payment integration.
-- Storage is in-memory with snapshot support. The compiler emits a MySQL-oriented SQL plan, but it does not yet execute against an always-on durable database service.
+- Storage is in-memory with snapshot support. The compiler emits a MySQL-oriented SQL plan with indexed lookups, indexed range scans, primary-key `BETWEEN` scans, and static rejection for `IN` query shapes, but it does not yet execute against an always-on durable database service.
 - Redis can back cache, FIFO queue, sorted-set queue, counter, TTL lock, and topic pub/sub primitives when configured. Cron, daemon, worker task ticks, and endpoint routes that call locked functions now acquire declared locks before running.
 - Frontend output is CDN-aware generated HTML metadata, not a reactive browser runtime.
 - Cron, daemon, and worker behavior runs through deterministic ticks, not real schedulers.
@@ -194,7 +194,7 @@ These are blocking for any serious production path.
 
 1. Real storage backend
 
-   The biggest gap. DeepAI has MySQL tables with hundreds of millions of rows where query patterns matter enormously: PK-range scans, no joins on huge tables, and `BETWEEN` over `IN`. In-memory storage with snapshots is not a path to production. DeepApp now emits a MySQL-oriented `sql-plan.json` with table/index DDL and indexed query plans, but it still needs to execute real SQL against a real database and broaden the query planner to cover production query shapes. The `@no_index` annotation on `ChatSession.created_at` is a good signal, and it now blocks unsafe query planning; it needs to keep driving actual SQL generation as the planner expands.
+   The biggest gap. DeepAI has MySQL tables with hundreds of millions of rows where query patterns matter enormously: PK-range scans, no joins on huge tables, and `BETWEEN` over `IN`. In-memory storage with snapshots is not a path to production. DeepApp now emits a MySQL-oriented `sql-plan.json` with table/index DDL, indexed lookup plans, indexed range plans, primary-key `BETWEEN` scans, and static rejection for `IN` query shapes. It still needs to execute real SQL against a real database and keep broadening the query planner to cover production query shapes. The `@no_index` annotation on `ChatSession.created_at` is a good signal, and it now blocks unsafe query planning; it needs to keep driving actual SQL generation as the planner expands.
 
 2. Real migrations on live data
 

@@ -57,6 +57,14 @@
       "index": "idx_ChatMessage_session",
       "strategy": "indexed_lookup",
       "sql": "SELECT * FROM `ChatMessage` WHERE `session` = ?;"
+    },
+    {
+      "source": "recent_messages = ChatMessage |> where(_.id between request.after_id and request.before_id)",
+      "table": "ChatMessage",
+      "field": "id",
+      "index": "PRIMARY",
+      "strategy": "pk_range_scan",
+      "sql": "SELECT * FROM `ChatMessage` WHERE `id` BETWEEN ? AND ?;"
     }
   ]
 }

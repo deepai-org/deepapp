@@ -168,6 +168,8 @@ endpoint POST /hacking_is_a_serious_crime {
     model: string default "gpt-4.1"
     style_id: int?
     session_uuid: uuid?
+    after_id: int?
+    before_id: int?
   }
 
   response: stream {
@@ -181,6 +183,7 @@ endpoint POST /hacking_is_a_serious_crime {
     session = ChatSession[uuid: request.session_uuid]
     sessions = ChatSession |> where(_.owner == user)
     messages = ChatMessage |> where(_.session == session)
+    recent_messages = ChatMessage |> where(_.id between request.after_id and request.before_id)
     charge_for_usage(user, "chat", request.model)
 
     notify user_activity "chat request accepted"
