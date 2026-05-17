@@ -56,6 +56,7 @@ The build writes JSON files that describe the app:
 - `static-report.json`: language-unit counts, invariants, and checked compiler rules.
 - `runtime-bundle.json`: what runtime capabilities the app needs.
 - `migrations.json`: storage reconciliation plan.
+- `sql-plan.json`: MySQL-oriented table DDL, index DDL, and indexed query plans.
 - `storage-catalog.json`: data schemas, indexes, uniqueness, and privacy/security flags.
 - `frontend-assets.json`: generated page assets.
 - `task-catalog.json`: cron, daemon, and worker metadata.

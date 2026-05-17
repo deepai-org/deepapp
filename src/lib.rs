@@ -154,11 +154,36 @@ pub struct BuildArtifacts {
     pub report: StaticReport,
     pub runtime: RuntimeBundle,
     pub migrations: Vec<MigrationStep>,
+    pub sql_plan: SqlPlan,
     pub storage_catalog: Vec<DataDecl>,
     pub frontend_assets: Vec<FrontendAsset>,
     pub task_catalog: Vec<TaskSpec>,
     pub model_catalog: Vec<ModelSpec>,
     pub pricing_catalog: Vec<PricingRule>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SqlPlan {
+    pub dialect: String,
+    pub tables: Vec<SqlTablePlan>,
+    pub queries: Vec<SqlQueryPlan>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SqlTablePlan {
+    pub table: String,
+    pub create_table: String,
+    pub indexes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SqlQueryPlan {
+    pub source: String,
+    pub table: String,
+    pub field: String,
+    pub index: String,
+    pub strategy: String,
+    pub sql: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1079,6 +1104,131 @@ fn check_queries(program: &Program, errors: &mut Vec<DeepError>) {
     }
 }
 
+fn compile_sql_plan(program: &Program) -> SqlPlan {
+    SqlPlan {
+        dialect: "mysql".into(),
+        tables: program.data.values().map(compile_sql_table).collect(),
+        queries: compile_sql_queries(program),
+    }
+}
+
+fn compile_sql_table(data: &DataDecl) -> SqlTablePlan {
+    let mut columns = Vec::new();
+    for field in data.fields.values() {
+        columns.push(format!(
+            "  `{}` {}{}",
+            field.name,
+            mysql_type(field),
+            if field.raw_type == "pk" {
+                " PRIMARY KEY AUTO_INCREMENT"
+            } else {
+                ""
+            }
+        ));
+    }
+    let create_table = format!(
+        "CREATE TABLE `{}` (\n{}\n) ENGINE=InnoDB;",
+        data.name,
+        columns.join(",\n")
+    );
+    let indexes = data
+        .indexes
+        .iter()
+        .filter(|field| field.as_str() != "id")
+        .map(|field| {
+            let unique = data
+                .fields
+                .get(field)
+                .map(|decl| decl.unique)
+                .unwrap_or(false);
+            format!(
+                "CREATE {}INDEX `idx_{}_{}` ON `{}` (`{}`);",
+                if unique { "UNIQUE " } else { "" },
+                data.name,
+                field,
+                data.name,
+                field
+            )
+        })
+        .collect();
+    SqlTablePlan {
+        table: data.name.clone(),
+        create_table,
+        indexes,
+    }
+}
+
+fn mysql_type(field: &FieldDecl) -> &'static str {
+    match field.raw_type.trim_end_matches('?') {
+        "pk" => "BIGINT UNSIGNED",
+        "int" => "BIGINT",
+        "bool" => "BOOLEAN",
+        "datetime" => "DATETIME",
+        "uuid" => "CHAR(36)",
+        raw if raw.starts_with('"') => "VARCHAR(64)",
+        _ => "TEXT",
+    }
+}
+
+fn compile_sql_queries(program: &Program) -> Vec<SqlQueryPlan> {
+    let query_re =
+        Regex::new(r"([A-Za-z][A-Za-z0-9_]*)\s*\|>\s*where\(_\.([A-Za-z][A-Za-z0-9_]*)\s*(==|>=|<=|>|<)\s*([^)]+)\)").unwrap();
+    let source = all_bodies(program);
+    let mut plans = Vec::new();
+    for line in source.lines().map(str::trim) {
+        let Some(caps) = query_re.captures(line) else {
+            continue;
+        };
+        let table = caps[1].to_string();
+        let field = caps[2].to_string();
+        let Some(data) = program.data.get(&table) else {
+            continue;
+        };
+        let Some(field_decl) = data.fields.get(&field) else {
+            continue;
+        };
+        if !data.indexes.contains(&field) || field_decl.no_index {
+            continue;
+        }
+        let op = mysql_operator(&caps[3]);
+        let index = if field == "id" {
+            "PRIMARY".into()
+        } else {
+            format!("idx_{table}_{field}")
+        };
+        plans.push(SqlQueryPlan {
+            source: line.to_string(),
+            table: table.clone(),
+            field: field.clone(),
+            index,
+            strategy: query_strategy(&field, op),
+            sql: format!("SELECT * FROM `{table}` WHERE `{field}` {op} ?;"),
+        });
+    }
+    plans
+}
+
+fn mysql_operator(op: &str) -> &'static str {
+    match op {
+        "==" => "=",
+        ">=" => ">=",
+        "<=" => "<=",
+        ">" => ">",
+        "<" => "<",
+        _ => "=",
+    }
+}
+
+fn query_strategy(field: &str, op: &str) -> String {
+    if field == "id" && op != "=" {
+        "pk_range_scan".into()
+    } else if op == "=" {
+        "indexed_lookup".into()
+    } else {
+        "indexed_range_scan".into()
+    }
+}
+
 fn check_sensitive_flows(program: &Program, errors: &mut Vec<DeepError>) {
     let source = all_bodies(program);
     for data in program.data.values() {
@@ -1278,6 +1428,7 @@ pub fn generate(program: &Program) -> BuildArtifacts {
                 action: "create_or_reconcile".into(),
             })
             .collect(),
+        sql_plan: compile_sql_plan(program),
         storage_catalog: program.data.values().cloned().collect(),
         frontend_assets: compile_frontend_assets(&program.pages),
         task_catalog: compile_task_catalog(program),
@@ -2400,6 +2551,23 @@ invariant "cron jobs have healthchecks"
                 cents: 1
             }
         );
+        assert_eq!(artifacts.sql_plan.dialect, "mysql");
+        assert!(artifacts
+            .sql_plan
+            .tables
+            .iter()
+            .any(|table| table.table == "ChatSession"
+                && table.create_table.contains("CREATE TABLE `ChatSession`")
+                && table
+                    .indexes
+                    .iter()
+                    .any(|index| index.contains("idx_ChatSession_owner"))));
+        assert!(artifacts.sql_plan.queries.iter().any(|query| {
+            query.table == "ChatSession"
+                && query.field == "owner"
+                && query.strategy == "indexed_lookup"
+                && query.sql == "SELECT * FROM `ChatSession` WHERE `owner` = ?;"
+        }));
         assert_eq!(artifacts.frontend_assets[0].title, "Chat");
         assert_eq!(
             artifacts.frontend_assets[0].html.contains("<h1>Chat</h1>"),

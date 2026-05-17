@@ -1,0 +1,62 @@
+{
+  "dialect": "mysql",
+  "tables": [
+    {
+      "table": "ChatMessage",
+      "create_table": "CREATE TABLE `ChatMessage` (\n  `content` TEXT,\n  `created_at` DATETIME,\n  `id` BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,\n  `model` TEXT,\n  `role` VARCHAR(64),\n  `session` TEXT,\n  `thinking` TEXT\n) ENGINE=InnoDB;",
+      "indexes": [
+        "CREATE INDEX `idx_ChatMessage_session` ON `ChatMessage` (`session`);"
+      ]
+    },
+    {
+      "table": "ChatSession",
+      "create_table": "CREATE TABLE `ChatSession` (\n  `client_info` TEXT,\n  `created_at` DATETIME,\n  `id` BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,\n  `owner` TEXT,\n  `style` TEXT,\n  `title` TEXT,\n  `uuid` CHAR(36)\n) ENGINE=InnoDB;",
+      "indexes": [
+        "CREATE INDEX `idx_ChatSession_client_info` ON `ChatSession` (`client_info`);",
+        "CREATE INDEX `idx_ChatSession_owner` ON `ChatSession` (`owner`);",
+        "CREATE UNIQUE INDEX `idx_ChatSession_uuid` ON `ChatSession` (`uuid`);"
+      ]
+    },
+    {
+      "table": "ChatStyle",
+      "create_table": "CREATE TABLE `ChatStyle` (\n  `creator` TEXT,\n  `id` BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,\n  `image_url` TEXT,\n  `is_public` BOOLEAN,\n  `name` TEXT,\n  `popularity` BIGINT,\n  `system_prompt` TEXT\n) ENGINE=InnoDB;",
+      "indexes": [
+        "CREATE INDEX `idx_ChatStyle_creator` ON `ChatStyle` (`creator`);",
+        "CREATE INDEX `idx_ChatStyle_popularity` ON `ChatStyle` (`popularity`);"
+      ]
+    },
+    {
+      "table": "ClientInfo",
+      "create_table": "CREATE TABLE `ClientInfo` (\n  `fingerprint` TEXT,\n  `id` BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,\n  `ip_address` TEXT\n) ENGINE=InnoDB;",
+      "indexes": [
+        "CREATE UNIQUE INDEX `idx_ClientInfo_fingerprint` ON `ClientInfo` (`fingerprint`);"
+      ]
+    },
+    {
+      "table": "User",
+      "create_table": "CREATE TABLE `User` (\n  `created_at` DATETIME,\n  `email` TEXT,\n  `id` BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,\n  `locked` BOOLEAN,\n  `password_hash` TEXT,\n  `username` TEXT\n) ENGINE=InnoDB;",
+      "indexes": [
+        "CREATE UNIQUE INDEX `idx_User_email` ON `User` (`email`);",
+        "CREATE UNIQUE INDEX `idx_User_username` ON `User` (`username`);"
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "source": "sessions = ChatSession |> where(_.owner == user)",
+      "table": "ChatSession",
+      "field": "owner",
+      "index": "idx_ChatSession_owner",
+      "strategy": "indexed_lookup",
+      "sql": "SELECT * FROM `ChatSession` WHERE `owner` = ?;"
+    },
+    {
+      "source": "messages = ChatMessage |> where(_.session == session)",
+      "table": "ChatMessage",
+      "field": "session",
+      "index": "idx_ChatMessage_session",
+      "strategy": "indexed_lookup",
+      "sql": "SELECT * FROM `ChatMessage` WHERE `session` = ?;"
+    }
+  ]
+}

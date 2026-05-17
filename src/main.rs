@@ -63,6 +63,7 @@ fn main() -> anyhow::Result<()> {
             write_json(out.join("static-report.json"), &artifacts.report)?;
             write_json(out.join("runtime-bundle.json"), &artifacts.runtime)?;
             write_json(out.join("migrations.json"), &artifacts.migrations)?;
+            write_json(out.join("sql-plan.json"), &artifacts.sql_plan)?;
             write_json(out.join("storage-catalog.json"), &artifacts.storage_catalog)?;
             write_json(out.join("frontend-assets.json"), &artifacts.frontend_assets)?;
             write_json(out.join("task-catalog.json"), &artifacts.task_catalog)?;

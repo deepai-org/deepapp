@@ -8,7 +8,7 @@ This repository currently contains a Rust implementation of a compiler frontend,
 
 - Parse a representative DeepApp v2 application.
 - Run static checks for indexed queries, private page access, secret/PII flows, notification channels, cron/daemon contracts, deploy rules, endpoint identity, and rate limits.
-- Generate JSON artifacts for routes, services, storage, migrations, frontend assets, background tasks, models, and pricing.
+- Generate JSON artifacts for routes, services, SQL planning, storage, migrations, frontend assets, background tasks, models, and pricing.
 - Run a local HTTP runtime for compiled pages and endpoints.
 - Serve runtime metadata through `/__deep/*` routes.
 - Exercise in-memory storage, cache, queues, counters, snapshots, model fallback, pricing, rate limiting, and deterministic task ticks.
@@ -79,6 +79,7 @@ Running `deep build` writes these files into `build/`:
 - `static-report.json`: language unit counts, invariants, checked rules.
 - `runtime-bundle.json`: runtime capability summary.
 - `migrations.json`: storage reconciliation plan.
+- `sql-plan.json`: MySQL-oriented table DDL, index DDL, and indexed query plans.
 - `storage-catalog.json`: data schemas, fields, indexes, uniqueness, privacy/security flags.
 - `frontend-assets.json`: generated page assets.
 - `task-catalog.json`: cron, daemon, and worker metadata.
@@ -162,7 +163,7 @@ Known gaps include:
 - Authentication is deterministic header classification, not real user/session lookup.
 - Rate limiting uses in-memory wall-clock buckets, not a distributed limiter.
 - Pricing is catalog lookup plus counters, not a billing ledger or payment integration.
-- Storage is in-memory with snapshot support, not an always-on durable database service.
+- Storage is in-memory with snapshot support. The compiler emits a MySQL-oriented SQL plan, but it does not yet execute against an always-on durable database service.
 - Frontend output is generated HTML metadata, not a reactive browser runtime.
 - Cron, daemon, and worker behavior runs through deterministic ticks, not real schedulers.
 - External providers such as OpenAI, Stripe, AWS, and S3 are represented as metadata, not real calls.
@@ -179,7 +180,7 @@ These are blocking for any serious production path.
 
 1. Real storage backend
 
-   The biggest gap. DeepAI has MySQL tables with hundreds of millions of rows where query patterns matter enormously: PK-range scans, no joins on huge tables, and `BETWEEN` over `IN`. In-memory storage with snapshots is not a path to production. DeepApp needs to emit real SQL against a real database, and the query planner needs to respect indexes declared in `data` blocks. The `@no_index` annotation on `ChatSession.created_at` is a good signal, but it needs to actually drive query generation.
+   The biggest gap. DeepAI has MySQL tables with hundreds of millions of rows where query patterns matter enormously: PK-range scans, no joins on huge tables, and `BETWEEN` over `IN`. In-memory storage with snapshots is not a path to production. DeepApp now emits a MySQL-oriented `sql-plan.json` with table/index DDL and indexed query plans, but it still needs to execute real SQL against a real database and broaden the query planner to cover production query shapes. The `@no_index` annotation on `ChatSession.created_at` is a good signal, and it now blocks unsafe query planning; it needs to keep driving actual SQL generation as the planner expands.
 
 2. Real migrations on live data
 

@@ -17,6 +17,7 @@ fn cli_builds_example_artifacts() {
     assert!(temp.join("static-report.json").exists());
     assert!(temp.join("runtime-bundle.json").exists());
     assert!(temp.join("migrations.json").exists());
+    assert!(temp.join("sql-plan.json").exists());
     assert!(temp.join("storage-catalog.json").exists());
     assert!(temp.join("frontend-assets.json").exists());
     assert!(temp.join("task-catalog.json").exists());
@@ -30,6 +31,9 @@ fn cli_builds_example_artifacts() {
     assert!(manifest.contains("\"limit\": 30"));
     let storage_catalog = fs::read_to_string(temp.join("storage-catalog.json")).unwrap();
     assert!(storage_catalog.contains("\"name\": \"User\""));
+    let sql_plan = fs::read_to_string(temp.join("sql-plan.json")).unwrap();
+    assert!(sql_plan.contains("\"dialect\": \"mysql\""));
+    assert!(sql_plan.contains("idx_ChatSession_owner"));
     let frontend_assets = fs::read_to_string(temp.join("frontend-assets.json")).unwrap();
     assert!(frontend_assets.contains("\"page\": \"chat\""));
     let task_catalog = fs::read_to_string(temp.join("task-catalog.json")).unwrap();
