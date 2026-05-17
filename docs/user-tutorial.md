@@ -158,7 +158,7 @@ Call the public chat endpoint:
 curl -i -N -X POST http://127.0.0.1:8080/hacking_is_a_serious_crime
 ```
 
-The prototype response is served as `text/event-stream` with HTTP chunked transfer. Its `data:` payload includes route metadata, selected model/provider metadata, and usage charge information.
+The prototype response is served as `text/event-stream` with HTTP chunked transfer. Its `data:` payload includes route metadata, selected model/provider metadata, usage charge information, and handler query counts for the indexed session/message lookups executed by the native chat handler.
 
 Call the research endpoint without credentials:
 
@@ -226,6 +226,6 @@ This exercises cron, daemon, and worker metadata without starting real long-runn
 
 ## What To Expect From The Prototype
 
-Implemented prototype behavior includes parsing, static checks, artifact generation, generated page HTML, endpoint routing, metadata routes, in-memory storage, Redis-backed cache/queues/counters/locks/topics when configured, declared Redis TTL and sorted-queue metadata, snapshots, endpoint identity policy, rate limits, model resolution, pricing, deterministic task ticks, task-level lock enforcement, and endpoint lock inheritance from called functions.
+Implemented prototype behavior includes parsing, static checks, artifact generation, generated page HTML, endpoint routing, metadata routes, in-memory storage, Redis-backed cache/queues/counters/locks/topics when configured, declared Redis TTL and sorted-queue metadata, snapshots, endpoint identity policy, rate limits, model resolution, pricing, native handler cache/queue/counter/indexed-query execution, deterministic task ticks, task-level lock enforcement, and endpoint lock inheritance from called functions.
 
 Not yet production-grade: arbitrary handler execution, real user/session authentication, distributed rate-limit cleanup/policy, real billing, provider calls, reactive browser behavior, real scheduled background loops, and always-on durable storage services.

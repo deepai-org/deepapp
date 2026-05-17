@@ -171,7 +171,7 @@ This is a working compiler/runtime prototype, not a complete production implemen
 
 Known gaps include:
 
-- Arbitrary handler bodies are not fully interpreted.
+- Arbitrary handler bodies are not fully interpreted, though native example handlers now execute declared cache, queue, counter, billing, and indexed store-query operations.
 - Streaming uses SSE/chunked transfer for compiled stream routes, but provider-backed token streaming is still deterministic prototype data.
 - Authentication is deterministic header classification, not real user/session lookup.
 - Rate limiting uses the configured counter backend, but it still lacks stale-bucket cleanup and a production policy engine.
@@ -206,7 +206,7 @@ These are blocking for any serious production path.
 
 3. Handler bodies that actually execute
 
-   The `handle` blocks are the application. Until `resolve_model(...).chat(request.messages)` actually calls OpenAI and `ChatMessage |> where(_.session == session)` actually queries the database, the language is still mostly a spec rather than a runtime.
+   The `handle` blocks are the application. DeepApp now has native runtime slices for the example handlers: research handlers enqueue/cache status, the chat handler charges usage, and the chat handler executes indexed store queries for `ChatSession |> where(_.owner == user)` and `ChatMessage |> where(_.session == session)`. The remaining production work is arbitrary handler interpretation, including real provider execution for `resolve_model(...).chat(request.messages)` and real SQL-backed execution rather than the current prototype store.
 
 4. Real authentication and identity resolution
 

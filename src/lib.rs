@@ -2992,6 +2992,29 @@ fn endpoint_response_unlocked(
 
     if route.path == "/hacking_is_a_serious_crime" {
         store.counter_add("endpoint:/hacking_is_a_serious_crime", 1);
+        let user_id = find_or_create_record(
+            store,
+            "User",
+            "email",
+            serde_json::json!("demo@deepai.org"),
+            JsonRecord::from([
+                ("email".into(), serde_json::json!("demo@deepai.org")),
+                ("password_hash".into(), serde_json::json!("runtime-managed")),
+            ]),
+        );
+        let session_id = find_or_create_record(
+            store,
+            "ChatSession",
+            "owner",
+            serde_json::json!(user_id),
+            JsonRecord::from([("owner".into(), serde_json::json!(user_id))]),
+        );
+        let sessions = store
+            .where_eq("ChatSession", "owner", &serde_json::json!(user_id))
+            .unwrap_or_default();
+        let messages = store
+            .where_eq("ChatMessage", "session", &serde_json::json!(session_id))
+            .unwrap_or_default();
         let resolution = resolve_model_from_catalog("gpt-4.1", models, &BTreeSet::new());
         let charge = charge_for_usage(store, pricing, "chat", &resolution.selected_model);
         let payload = serde_json::json!({
@@ -3003,7 +3026,11 @@ fn endpoint_response_unlocked(
             "provider": resolution.selected_provider,
             "fallback_used": resolution.fallback_used,
             "charge_cents": charge.cents,
-            "usage_count": charge.usage_count
+            "usage_count": charge.usage_count,
+            "handler_queries": {
+                "sessions": sessions.len(),
+                "messages": messages.len()
+            }
         });
         return if route.response_stream {
             sse_response(vec![
@@ -3048,6 +3075,27 @@ fn endpoint_response_unlocked(
         .to_string(),
         chunked: false,
     }
+}
+
+fn find_or_create_record(
+    store: &MemoryStore,
+    data: &str,
+    field: &str,
+    value: serde_json::Value,
+    defaults: JsonRecord,
+) -> u64 {
+    if let Ok(records) = store.where_eq(data, field, &value) {
+        if let Some(id) = records
+            .first()
+            .and_then(|record| record.get("id"))
+            .and_then(serde_json::Value::as_u64)
+        {
+            return id;
+        }
+    }
+    store
+        .create(data, defaults)
+        .expect("native handler record create failed")
 }
 
 fn evaluate_handler_response(
@@ -3977,6 +4025,9 @@ invariant "cron jobs have healthchecks"
         assert!(response.chunked);
         assert!(response.body.contains("\"model\":\"gpt-4.1-nano\""));
         assert!(response.body.contains("\"charge_cents\":1"));
+        assert!(response.body.contains("\"handler_queries\""));
+        assert!(response.body.contains("\"sessions\":1"));
+        assert!(response.body.contains("\"messages\":0"));
         assert_eq!(
             runtime
                 .store()
@@ -3987,6 +4038,19 @@ invariant "cron jobs have healthchecks"
             runtime.store().counter_get("usage:chat:gpt-4.1-nano:cents"),
             1
         );
+
+        runtime
+            .store()
+            .create(
+                "ChatMessage",
+                JsonRecord::from([
+                    ("session".into(), serde_json::json!(1)),
+                    ("content".into(), serde_json::json!("hello")),
+                ]),
+            )
+            .unwrap();
+        let response = runtime.handle("POST", "/hacking_is_a_serious_crime");
+        assert!(response.body.contains("\"messages\":1"));
     }
 
     #[test]
