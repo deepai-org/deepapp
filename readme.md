@@ -11,6 +11,7 @@ This repository currently contains a Rust implementation of a compiler frontend,
 - Generate JSON artifacts for routes, services, SQL planning, storage, migrations, frontend assets, background tasks, models, and pricing.
 - Run a local HTTP runtime for compiled pages and endpoints.
 - Serve `response: stream` endpoints as Server-Sent Events over HTTP chunked transfer.
+- Generate CDN-aware frontend assets with cache policy, API base URL, and client-fetch data loading metadata.
 - Serve runtime metadata through `/__deep/*` routes.
 - Exercise in-memory storage, cache, queues, counters, snapshots, model fallback, pricing, rate limiting, and deterministic task ticks.
 
@@ -166,7 +167,7 @@ Known gaps include:
 - Rate limiting uses in-memory wall-clock buckets, not a distributed limiter.
 - Pricing is catalog lookup plus counters, not a billing ledger or payment integration.
 - Storage is in-memory with snapshot support. The compiler emits a MySQL-oriented SQL plan, but it does not yet execute against an always-on durable database service.
-- Frontend output is generated HTML metadata, not a reactive browser runtime.
+- Frontend output is CDN-aware generated HTML metadata, not a reactive browser runtime.
 - Cron, daemon, and worker behavior runs through deterministic ticks, not real schedulers.
 - External providers such as OpenAI, Stripe, AWS, and S3 are represented as metadata, not real calls.
 
@@ -214,7 +215,7 @@ These would block most useful application slices.
 
 7. CDN-aware page serving
 
-   The `cdn` block and `cache private` page annotation are pointed in the right direction, but the critical constraint is stricter: never render user data in cached pages; load it client-side via the correct app/API base URL. That needs to be enforced in generated frontend behavior, not only declared.
+   The `cdn` block and `cache private` page annotation are pointed in the right direction, but the critical constraint is stricter: never render user data in cached pages; load it client-side via the correct app/API base URL. Generated frontend assets now carry cache policy, `api_base_url`, and `client_fetch` metadata and expose those in HTML. The remaining production work is turning that metadata into a real reactive browser data-loading runtime.
 
 8. Worker/GPU integration
 

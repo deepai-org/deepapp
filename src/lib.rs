@@ -295,6 +295,9 @@ pub struct MigrationStep {
 pub struct FrontendAsset {
     pub page: String,
     pub path: String,
+    pub cache: CacheMode,
+    pub api_base_url: Option<String>,
+    pub data_loading: String,
     pub title: String,
     pub components: Vec<String>,
     pub states: Vec<String>,
@@ -1459,7 +1462,7 @@ pub fn generate(program: &Program) -> BuildArtifacts {
         migrations,
         sql_plan,
         storage_catalog: program.data.values().cloned().collect(),
-        frontend_assets: compile_frontend_assets(&program.pages),
+        frontend_assets: compile_frontend_assets(&program.pages, program.cdn.as_ref()),
         task_catalog: compile_task_catalog(program),
         model_catalog: program.model_catalog.clone(),
         pricing_catalog: program.pricing_catalog.clone(),
@@ -1504,7 +1507,7 @@ fn compile_task_catalog(program: &Program) -> Vec<TaskSpec> {
     tasks
 }
 
-fn compile_frontend_assets(pages: &[PageDecl]) -> Vec<FrontendAsset> {
+fn compile_frontend_assets(pages: &[PageDecl], cdn: Option<&CdnDecl>) -> Vec<FrontendAsset> {
     pages
         .iter()
         .map(|page| {
@@ -1512,13 +1515,25 @@ fn compile_frontend_assets(pages: &[PageDecl]) -> Vec<FrontendAsset> {
                 .unwrap_or_else(|| humanize_name(&page.name));
             let components = extract_named_declarations(&page.body, "component");
             let states = extract_named_declarations(&page.body, "state");
+            let api_base_url = cdn.and_then(|cdn| {
+                cdn.api_domain
+                    .as_ref()
+                    .map(|domain| format!("https://{domain}"))
+            });
+            let data_loading = match page.cache {
+                CacheMode::Public | CacheMode::Private => "client_fetch".into(),
+                CacheMode::Unspecified => "runtime_default".into(),
+            };
             FrontendAsset {
                 page: page.name.clone(),
                 path: page.path.clone(),
+                cache: page.cache.clone(),
+                api_base_url,
+                data_loading,
                 title: title.clone(),
                 components: components.clone(),
                 states: states.clone(),
-                html: render_frontend_html(page, &title, &components, &states),
+                html: render_frontend_html(page, &title, &components, &states, cdn),
             }
         })
         .collect()
@@ -1546,6 +1561,7 @@ fn render_frontend_html(
     title: &str,
     components: &[String],
     states: &[String],
+    cdn: Option<&CdnDecl>,
 ) -> String {
     let component_attrs = components
         .iter()
@@ -1557,11 +1573,27 @@ fn render_frontend_html(
         .map(|state| html_escape(state))
         .collect::<Vec<_>>()
         .join(",");
+    let api_base_url = cdn
+        .and_then(|cdn| cdn.api_domain.as_ref())
+        .map(|domain| format!("https://{domain}"))
+        .unwrap_or_default();
+    let cache_mode = match page.cache {
+        CacheMode::Public => "public",
+        CacheMode::Private => "private",
+        CacheMode::Unspecified => "runtime_default",
+    };
+    let data_loading = match page.cache {
+        CacheMode::Public | CacheMode::Private => "client_fetch",
+        CacheMode::Unspecified => "runtime_default",
+    };
     format!(
-        "<!doctype html><html><head><title>{title}</title><meta name=\"deepapp-page\" content=\"{page_name}\"></head><body><main data-route=\"{path}\" data-components=\"{components}\" data-states=\"{states}\"><h1>{title}</h1></main></body></html>",
+        "<!doctype html><html><head><title>{title}</title><meta name=\"deepapp-page\" content=\"{page_name}\"><meta name=\"deepapp-cache\" content=\"{cache_mode}\"><meta name=\"deepapp-data-loading\" content=\"{data_loading}\"></head><body><main data-route=\"{path}\" data-api-base=\"{api_base}\" data-cache=\"{cache_mode}\" data-data-loading=\"{data_loading}\" data-components=\"{components}\" data-states=\"{states}\"><h1>{title}</h1></main><script>window.__DEEPAPP__={{apiBase:\"{api_base}\",cache:\"{cache_mode}\",dataLoading:\"{data_loading}\"}};</script></body></html>",
         title = html_escape(title),
         page_name = html_escape(&page.name),
         path = html_escape(&page.path),
+        api_base = html_escape(&api_base_url),
+        cache_mode = cache_mode,
+        data_loading = data_loading,
         components = component_attrs,
         states = state_attrs
     )
@@ -2658,10 +2690,22 @@ invariant "cron jobs have healthchecks"
                 && !step.ddl.is_empty()
         }));
         assert_eq!(artifacts.frontend_assets[0].title, "Chat");
+        assert_eq!(artifacts.frontend_assets[0].cache, CacheMode::Private);
+        assert_eq!(
+            artifacts.frontend_assets[0].api_base_url,
+            Some("https://api.deepai.org".into())
+        );
+        assert_eq!(artifacts.frontend_assets[0].data_loading, "client_fetch");
         assert_eq!(
             artifacts.frontend_assets[0].html.contains("<h1>Chat</h1>"),
             true
         );
+        assert!(artifacts.frontend_assets[0]
+            .html
+            .contains("data-api-base=\"https://api.deepai.org\""));
+        assert!(artifacts.frontend_assets[0]
+            .html
+            .contains("data-data-loading=\"client_fetch\""));
         assert_eq!(artifacts.task_catalog.len(), 3);
         assert!(artifacts
             .task_catalog

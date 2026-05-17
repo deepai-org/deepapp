@@ -41,6 +41,8 @@ fn cli_builds_example_artifacts() {
     assert!(sql_plan.contains("idx_ChatSession_owner"));
     let frontend_assets = fs::read_to_string(temp.join("frontend-assets.json")).unwrap();
     assert!(frontend_assets.contains("\"page\": \"chat\""));
+    assert!(frontend_assets.contains("\"api_base_url\": \"https://api.deepai.org\""));
+    assert!(frontend_assets.contains("\"data_loading\": \"client_fetch\""));
     let task_catalog = fs::read_to_string(temp.join("task-catalog.json")).unwrap();
     assert!(task_catalog.contains("\"name\": \"daily_billing\""));
     let model_catalog = fs::read_to_string(temp.join("model-catalog.json")).unwrap();

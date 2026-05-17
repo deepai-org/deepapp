@@ -58,7 +58,7 @@ The build writes JSON files that describe the app:
 - `migrations.json`: ordered pre-deploy migration plan with online/resumable metadata, DDL, lock-risk notes, and checkpoint keys.
 - `sql-plan.json`: MySQL-oriented table DDL, index DDL, and indexed query plans.
 - `storage-catalog.json`: data schemas, indexes, uniqueness, and privacy/security flags.
-- `frontend-assets.json`: generated page assets.
+- `frontend-assets.json`: generated page assets with cache policy, API base URL, and client-fetch data-loading metadata.
 - `task-catalog.json`: cron, daemon, and worker metadata.
 - `model-catalog.json`: model provider metadata.
 - `pricing-catalog.json`: category/model prices in cents.
